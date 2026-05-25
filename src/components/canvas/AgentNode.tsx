@@ -69,7 +69,7 @@ function AgentNodeImpl({ data, selected }: NodeProps) {
   return (
     <div
       className="relative"
-      onClick={() => select({ kind: "agent", id: def.id })}
+      onClick={() => select({ kind: "agent", id: def.id as import("@/lib/types").AgentId })}
     >
       <Handle type="target" position={Position.Left} style={{ background: `rgba(${rgb}, 0.9)` }} />
 

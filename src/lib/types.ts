@@ -23,6 +23,16 @@ export interface AgentRuntimeState {
 
 export type AgentId = "intake" | "monitor" | "writer" | "notification";
 
+export type TopicName =
+  | "ops.requests.v1"
+  | "ops.kafka.metrics.v1"
+  | "ops.incidents.v1"
+  | "ops.actions.audit.v1"
+  | "ops.lessons.v1"
+  | "ops.notifications.v1"
+  | "demo.payments.events"
+  | string; // allow dynamic topic names
+
 export type MralPhase = "idle" | "monitor" | "reason" | "awaiting" | "act" | "learn" | "replaying";
 
 export type AgentStatus =
