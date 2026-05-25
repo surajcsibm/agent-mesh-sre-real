@@ -5,7 +5,7 @@ import type {
   AgentState, BrokerState, MralPhase, ApprovalRequest,
   AuditRecord, LessonRecord, NotificationRecord, BusEvent,
 } from "@/lib/types";
-import { runClientScenario, resolvePendingApproval, type ScenarioKey, type SimAction } from "@/lib/client-sim";
+import { runClientScenario, resolvePendingApproval, type ScenarioKey, type SimAction, type EmailSummaryData } from "@/lib/client-sim";
 
 export interface MeshClientState {
   agents: AgentState[];
@@ -20,10 +20,13 @@ export interface MeshClientState {
   toasts: { id: number; message: string; kind: string }[];
   particles: { id: string; edgeId: string; fromNode: string; toNode: string; ts: number }[];
   connected: boolean;
+  emailSummary: EmailSummaryData | null;
 }
 
+export type { EmailSummaryData };
+
 type Action =
-  | { type: "state"; payload: Omit<MeshClientState, "toasts" | "particles" | "connected" | "auditLog" | "lessons" | "notifications"> & { auditLog?: AuditRecord[]; lessons?: LessonRecord[]; notifications?: NotificationRecord[]; scenarioRunning?: boolean } }
+  | { type: "state"; payload: Omit<MeshClientState, "toasts" | "particles" | "connected" | "auditLog" | "lessons" | "notifications" | "emailSummary"> & { auditLog?: AuditRecord[]; lessons?: LessonRecord[]; notifications?: NotificationRecord[]; scenarioRunning?: boolean } }
   | { type: "audit"; record: AuditRecord }
   | { type: "toast"; message: string; kind: string; id: number }
   | { type: "dismissToast"; id: number }
@@ -31,13 +34,15 @@ type Action =
   | { type: "clearParticle"; id: string }
   | { type: "notification"; record: NotificationRecord }
   | { type: "lesson"; record: LessonRecord }
-  | { type: "connected"; value: boolean };
+  | { type: "connected"; value: boolean }
+  | { type: "emailSummary"; data: EmailSummaryData | null };
 
 const initial: MeshClientState = {
   agents: [], broker: null, mralPhase: "idle",
   pendingApprovals: [], auditLog: [], lessons: [], notifications: [],
   incidentQueueDepth: 0, scenarioRunning: false,
   toasts: [], particles: [], connected: false,
+  emailSummary: null,
 };
 
 function reducer(state: MeshClientState, action: Action): MeshClientState {
@@ -58,6 +63,7 @@ function reducer(state: MeshClientState, action: Action): MeshClientState {
     case "notification": return { ...state, notifications: [...state.notifications.slice(-49), action.record] };
     case "lesson": return { ...state, lessons: [...state.lessons.slice(-19), action.record] };
     case "connected": return { ...state, connected: action.value };
+    case "emailSummary": return { ...state, emailSummary: action.data };
     default: return state;
   }
 }
@@ -122,17 +128,16 @@ export function useMeshStream() {
   }, []);
 
   const trigger = async (scenarioId: string) => {
-    // Always run the client-side simulation so Vercel deployments work
-    // (serverless instances don't share globalThis state, so SSE from a
-    // different instance won't carry the server-side events to this client).
+    // The client-side simulation handles ALL visual animation and audit records.
+    // We do NOT also call /api/mesh/scenario because:
+    //   • On localhost  → SSE would deliver server-side events on top of the
+    //     client-sim events, producing duplicate audit log entries.
+    //   • On Vercel     → serverless isolation means the SSE stream and the
+    //     scenario trigger run in different instances; server events never
+    //     arrive anyway, so the double-call is pure noise.
+    // For REAL Kafka mode (actual broker mutations), wire up a separate
+    // "exec-only" endpoint that fires mutations without pushing SSE events.
     runClientScenario(scenarioId as ScenarioKey, dispatch as (a: SimAction) => void);
-
-    // Also notify the server (fires real Kafka mutations when in REAL mode).
-    fetch("/api/mesh/scenario", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: scenarioId }),
-    }).catch(() => { /* server-side fire-and-forget; client sim already running */ });
   };
 
   const approve = async (id: string, decision: "approve" | "reject") => {
@@ -144,12 +149,24 @@ export function useMeshStream() {
   };
 
   const agentAction = async (agentId: string, action: "kill" | "restart") => {
-    await fetch("/api/mesh/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agentId, action }) });
+    // Show immediate popup — user shouldn't have to hunt for feedback
+    const id = ++toastId;
+    const agentLabel = agentId.replace("-agent", "");
+    if (action === "kill") {
+      dispatch({ type: "toast", message: `⚰️ ${agentLabel} agent killed — click Restart to resume`, kind: "error", id });
+      setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+    } else {
+      dispatch({ type: "toast", message: `✅ ${agentLabel} agent restarted successfully`, kind: "success", id });
+      setTimeout(() => dispatch({ type: "dismissToast", id }), 4500);
+    }
+    fetch("/api/mesh/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agentId, action }) }).catch(() => {});
   };
 
   const reset = async () => {
     await fetch("/api/mesh/reset", { method: "POST" });
   };
 
-  return { state, trigger, approve, agentAction, reset };
+  const dismissEmailSummary = () => dispatch({ type: "emailSummary", data: null });
+
+  return { state, trigger, approve, agentAction, reset, dismissEmailSummary };
 }

@@ -46,14 +46,28 @@ function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
   const statusColor = STATUS_COLOR[agent.status] ?? "#94a3b8";
   const mralColor   = MRAL_COLOR[agent.mralPhase] ?? "#94a3b8";
   const crashed     = agent.status === "crashed";
+  const isActive    = ["reasoning", "acting", "learning"].includes(agent.status);
+  const isAwaiting  = agent.status === "awaiting-approval";
 
   return (
-    <div className={clsx(
-      "relative rounded-xl border-2 p-3 w-44 shadow-md transition-all duration-300",
-      crashed
-        ? "bg-red-50 border-red-300"
-        : "bg-blue-50 border-blue-200"
-    )}>
+    <div
+      className={clsx(
+        "relative rounded-xl border-2 p-3 w-44 shadow-md transition-all duration-300",
+        crashed   ? "bg-red-50 border-red-300" :
+        isAwaiting? "bg-amber-50 border-amber-400" :
+        isActive  ? "bg-white border-blue-400" :
+                    "bg-blue-50 border-blue-200"
+      )}
+      style={{
+        transform:  isActive || isAwaiting ? "scale(1.07)" : "scale(1)",
+        boxShadow:  isAwaiting
+          ? `0 0 0 3px #fcd34d55, 0 8px 24px rgba(217, 119, 6, 0.25)`
+          : isActive
+          ? `0 0 0 2px ${statusColor}44, 0 8px 24px ${statusColor}30`
+          : undefined,
+        zIndex: isActive || isAwaiting ? 10 : 0,
+      }}
+    >
       <Handle type="target" position={Position.Left}
         style={{ background: "#93c5fd", border: "2px solid #bfdbfe" }} />
       <Handle type="source" position={Position.Right}
@@ -79,9 +93,14 @@ function AgentNode({ data }: NodeProps<Node<AgentNodeData>>) {
       </div>
 
       {/* Status text */}
-      <div className={clsx("text-[10px] truncate mb-1.5",
-        crashed ? "text-red-500 font-semibold" : "text-slate-500")}>
-        {agent.status}
+      <div className={clsx(
+        "text-[10px] truncate mb-1.5 font-semibold uppercase tracking-wide",
+        crashed    ? "text-red-600" :
+        isAwaiting ? "text-amber-600" :
+        isActive   ? "text-blue-600" :
+                     "text-slate-400"
+      )}>
+        {agent.status.replace(/-/g, " ")}
       </div>
 
       {/* Last action snippet */}

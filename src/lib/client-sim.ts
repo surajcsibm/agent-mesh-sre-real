@@ -20,6 +20,19 @@ import type {
 
 type DispatchFn = (action: SimAction) => void;
 
+/** Scenario-end summary surfaced to Dashboard as a popup modal. */
+export interface EmailSummaryData {
+  scenarioLabel: string;
+  scenarioId: string;
+  action: string;
+  lagBefore: number;
+  lagAfter: number;
+  approved: boolean;
+  approvedBy?: string;
+  sent: boolean;
+  emailError?: string;
+}
+
 export type SimAction =
   | { type: "state"; payload: Partial<SimStatePayload> & { agents: AgentState[]; mralPhase: MralPhase } }
   | { type: "audit"; record: AuditRecord }
@@ -29,7 +42,8 @@ export type SimAction =
   | { type: "clearParticle"; id: string }
   | { type: "notification"; record: NotificationRecord }
   | { type: "lesson"; record: LessonRecord }
-  | { type: "connected"; value: boolean };
+  | { type: "connected"; value: boolean }
+  | { type: "emailSummary"; data: EmailSummaryData | null };
 
 interface SimStatePayload {
   agents: AgentState[];
@@ -114,12 +128,42 @@ function toast(dispatch: DispatchFn, message: string, kind = "info") {
 
 // ── Email trigger ─────────────────────────────────────────────────────────────
 
-function sendEmail(scenarioId: string, scenarioLabel: string, lagBefore: number, lagAfter: number, action: string, approvedBy = "vp-engineering@stage") {
+function sendEmail(
+  dispatch: DispatchFn,
+  scenarioId: string,
+  scenarioLabel: string,
+  lagBefore: number,
+  lagAfter: number,
+  action: string,
+  approvedBy = "operator",
+) {
   fetch("/api/notify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scenarioId, scenarioLabel, lagBefore, lagAfter, action, approvedBy }),
-  }).catch(() => { /* non-fatal: SMTP may not be configured */ });
+  })
+    .then((r) => r.json())
+    .then((data: { ok: boolean; error?: string }) => {
+      // Surface result as a scenario-end modal
+      dispatch({
+        type: "emailSummary",
+        data: {
+          scenarioLabel, scenarioId, action,
+          lagBefore, lagAfter, approved: true, approvedBy,
+          sent: data.ok, emailError: data.ok ? undefined : data.error,
+        },
+      });
+    })
+    .catch(() => {
+      dispatch({
+        type: "emailSummary",
+        data: {
+          scenarioLabel, scenarioId, action,
+          lagBefore, lagAfter, approved: true, approvedBy,
+          sent: false, emailError: "network_error",
+        },
+      });
+    });
 }
 
 // ── Schedule helper ────────────────────────────────────────────────────────────
@@ -226,7 +270,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
           const slackNotif: NotificationRecord = { id: uid(), ts: Date.now(), channel: "slack", title: "Lag spike resolved", message: "✅ payments-consumer lag spike resolved · lag 4200→0 · scaled N→N+2", scenarioId: "lag-spike" };
           dispatch({ type: "notification", record: slackNotif });
           toast(dispatch, "📢 Slack + ITSM notification sent — sending email summary…", "success");
-          sendEmail("lag-spike", "Consumer Lag Spike", 4200, 0, "kafka.scaleConsumers");
+          sendEmail(dispatch, "lag-spike", "Consumer Lag Spike", 4200, 0, "kafka.scaleConsumers");
         }, 3000));
 
         allTimers.push(setTimeout(() => {
@@ -250,7 +294,17 @@ function runLagSpike(dispatch: DispatchFn): () => void {
         agents = baseAgents(); // reset all agents to online/idle
         dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
         dispatch({ type: "audit", record: auditRec("monitor", "Action REJECTED by operator — kafka.scaleConsumers not executed, scenario aborted") });
-        toast(dispatch, "🚫 Action rejected — scenario aborted, no changes made", "error");
+        // Show rejection modal (no email sent)
+        dispatch({
+          type: "emailSummary",
+          data: {
+            scenarioLabel: "Consumer Lag Spike",
+            scenarioId: "lag-spike",
+            action: "kafka.scaleConsumers",
+            lagBefore: 4200, lagAfter: 4200,
+            approved: false, sent: false,
+          },
+        });
       }
     };
   });
@@ -291,7 +345,7 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
       dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: { ...mockBroker(0), controllerEpoch: 15 }, pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
       dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Controller failover", message: "ℹ️ KRaft controller failover epoch 14→15 acknowledged, cluster healthy", scenarioId: "controller-failover" } });
       toast(dispatch, "✅ Controller failover handled — sending email summary…", "success");
-      sendEmail("controller-failover", "KRaft Controller Failover", 0, 0, "kafka.acknowledgeFailover");
+      sendEmail(dispatch, "controller-failover", "KRaft Controller Failover", 0, 0, "kafka.acknowledgeFailover");
     }},
     { ms: 9000, fn: () => {
       agents = patch(agents, "notification", { status: "online" });
@@ -332,7 +386,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
       agents = patch(agents, "notification", { status: "acting" });
       dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
       dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Share-group rebalance", message: "✅ payments-share-group rebalance complete — offsets checkpointed", scenarioId: "share-group-rebalance" } });
-      sendEmail("share-group", "Share Group Rebalance", 600, 0, "kafka.shareGroupCheckpoint");
+      sendEmail(dispatch, "share-group", "Share Group Rebalance", 600, 0, "kafka.shareGroupCheckpoint");
     }},
     { ms: 9500, fn: () => {
       agents = patch(agents, "notification", { status: "online" });
@@ -374,7 +428,7 @@ function runPartitionImbalance(dispatch: DispatchFn): () => void {
       agents = patch(agents, "notification", { status: "acting" });
       dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
       dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Partition imbalance resolved", message: "✅ Partition leadership rebalanced — broker distribution: 33%/34%/33%", scenarioId: "partition-imbalance" } });
-      sendEmail("partition-imbalance", "Partition Imbalance", 0, 0, "kafka.rebalancePartitions");
+      sendEmail(dispatch, "partition-imbalance", "Partition Imbalance", 0, 0, "kafka.rebalancePartitions");
     }},
     { ms: 9000, fn: () => {
       agents = patch(agents, "notification", { status: "online" });
@@ -434,7 +488,7 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
       dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
       dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Alert suppressed", message: "🛡️ Routine rebalance — false positive suppressed, SLO intact, no ticket opened", scenarioId: "benign-rebalance" } });
       toast(dispatch, "✅ False-positive suppression complete — email summary sent", "success");
-      sendEmail("benign-rebalance", "False-Positive Suppression", 120, 0, "suppress-alert");
+      sendEmail(dispatch, "benign-rebalance", "False-Positive Suppression", 120, 0, "suppress-alert");
     }},
     { ms: 9000, fn: () => {
       agents = patch(agents, "notification", { status: "online" });

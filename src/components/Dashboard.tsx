@@ -2,7 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useMeshStream } from "./useMeshStream";
-import type { ApprovalRequest, AuditRecord } from "@/lib/types";
+import type { ApprovalRequest, AuditRecord, MCPToolCall, AgentState } from "@/lib/types";
+import type { EmailSummaryData } from "./useMeshStream";
 import clsx from "clsx";
 import { useSession, signOut } from "next-auth/react";
 import { useState } from "react";
@@ -57,25 +58,148 @@ const MRAL_DOT: Record<string, string> = {
 // ── Toast stack ───────────────────────────────────────────────────────────────
 
 function ToastStack({ toasts }: { toasts: { id: number; message: string; kind: string }[] }) {
-  const styles: Record<string, string> = {
-    info:    "bg-blue-50   border-blue-200   text-blue-800",
-    success: "bg-green-50  border-green-200  text-green-800",
-    warning: "bg-amber-50  border-amber-200  text-amber-800",
-    error:   "bg-red-50    border-red-200    text-red-700",
+  const styles: Record<string, { bg: string; border: string; text: string; dot: string }> = {
+    info:    { bg: "bg-blue-50",   border: "border-blue-200",  text: "text-blue-800",  dot: "bg-blue-500"  },
+    success: { bg: "bg-green-50",  border: "border-green-200", text: "text-green-800", dot: "bg-green-500" },
+    warning: { bg: "bg-amber-50",  border: "border-amber-200", text: "text-amber-800", dot: "bg-amber-500" },
+    error:   { bg: "bg-red-50",    border: "border-red-200",   text: "text-red-700",   dot: "bg-red-500"   },
   };
-  const icons: Record<string, string> = { info: "ℹ", success: "✓", warning: "⚠", error: "✕" };
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
-      {toasts.map((t) => (
-        <div key={t.id}
-          className={clsx("flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium shadow-lg border",
-            styles[t.kind] ?? styles.info)}>
-          <span className="text-xs font-bold">{icons[t.kind] ?? "ℹ"}</span>
-          {t.message}
-        </div>
-      ))}
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col-reverse gap-2 max-w-sm pointer-events-none">
+      {toasts.map((t) => {
+        const s = styles[t.kind] ?? styles.info;
+        return (
+          <div key={t.id}
+            className={clsx(
+              "flex items-start gap-3 rounded-xl px-4 py-3 shadow-xl border pointer-events-auto",
+              "animate-[slideInRight_0.25s_ease-out]",
+              s.bg, s.border
+            )}>
+            <div className={clsx("w-2 h-2 rounded-full mt-1.5 shrink-0 animate-pulse", s.dot)} />
+            <span className={clsx("text-sm font-medium leading-snug", s.text)}>{t.message}</span>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+// ── Live activity banner ──────────────────────────────────────────────────────
+// Slides in below the nav whenever any agent is actively processing.
+
+const AGENT_COLOR: Record<string, string> = {
+  intake: "#0ea5e9", monitor: "#a78bfa", writer: "#34d399", notification: "#fbbf24",
+};
+
+const PHASE_DESC: Partial<Record<AgentState["status"], string>> = {
+  reasoning:          "is analyzing the incident",
+  acting:             "is executing an action",
+  "awaiting-approval":"is waiting for your approval",
+  learning:           "is recording a lesson",
+};
+
+function LiveActivityBanner({ agents }: { agents: AgentState[] }) {
+  const active = agents.find((a) =>
+    (["reasoning", "acting", "awaiting-approval", "learning"] as AgentState["status"][]).includes(a.status)
+  );
+  if (!active) return null;
+
+  const color = AGENT_COLOR[active.id] ?? "#60a5fa";
+  const desc  = PHASE_DESC[active.status] ?? active.status;
+
+  // Pick the most informative detail line
+  let detail: string | null = null;
+  if (active.status === "reasoning" && active.lastReasoning) {
+    const pct = Math.round(active.lastReasoning.confidence * 100);
+    detail = `${active.lastReasoning.rootCause} · ${pct}% confidence`;
+  } else if (active.status === "acting" && active.lastAction) {
+    detail = active.lastAction.detail;
+  } else if (active.status === "learning" && active.lastLesson) {
+    detail = active.lastLesson.notes?.slice(0, 90) ?? null;
+  }
+
+  return (
+    <div className="mx-4 mt-2 mb-1 transition-all animate-[slideDown_0.3s_ease-out]">
+      <div
+        className="flex items-center gap-3 rounded-xl border px-4 py-2.5 shadow-sm"
+        style={{ borderColor: color + "44", background: color + "0d" }}
+      >
+        <span className="w-2 h-2 rounded-full animate-pulse shrink-0" style={{ background: color }} />
+        <span className="text-sm font-bold" style={{ color }}>{active.name}</span>
+        <span className="text-sm text-slate-600">{desc}</span>
+        {detail && (
+          <>
+            <span className="text-slate-300 shrink-0">·</span>
+            <span className="text-xs text-slate-500 truncate flex-1">{detail}</span>
+          </>
+        )}
+        {active.status === "awaiting-approval" && (
+          <span className="ml-auto shrink-0 text-xs font-bold text-amber-700 bg-amber-50
+                           border border-amber-300 rounded-full px-2.5 py-0.5 animate-pulse">
+            ↓ Review below
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Human-readable tool-call description ─────────────────────────────────────
+
+function describeToolCall(toolCall: MCPToolCall) {
+  const name = toolCall.params.name;
+  const args = toolCall.params.arguments as Record<string, unknown>;
+
+  switch (name) {
+    case "kafka.scaleConsumers":
+      return {
+        emoji: "⬆️",
+        title: "Scale Consumer Group",
+        summary: `Add ${args.delta} consumer replica${Number(args.delta) > 1 ? "s" : ""} to "${args.group}"`,
+        rows: [
+          ["Consumer group",   String(args.group)],
+          ["Replicas to add",  `+${args.delta} consumers`],
+          ["Reason",           String(args.reason ?? "Lag spike detected")],
+        ] as [string, string][],
+        impact: "Temporary infra change · Auto-reverts when lag clears",
+        impactColor: "amber",
+      };
+    case "kafka.checkpointShareGroup":
+      return {
+        emoji: "📌",
+        title: "Checkpoint Share Group",
+        summary: `Checkpoint KIP-932 share group "${args.shareGroupId}"`,
+        rows: [
+          ["Share group ID",   String(args.shareGroupId)],
+          ...(args.delta ? [["Consumer delta", `+${args.delta}`] as [string, string]] : []),
+          ...(args.checkpointOffset ? [["Checkpoint offset", String(args.checkpointOffset)] as [string, string]] : []),
+        ] as [string, string][],
+        impact: "Offset committed · No partition reassignment needed",
+        impactColor: "blue",
+      };
+    case "kafka.suppressRebalancePage":
+      return {
+        emoji: "🔇",
+        title: "Suppress Rebalance Alert",
+        summary: `Suppress page for consumer group "${args.consumerGroup}" during rebalance`,
+        rows: [
+          ["Consumer group",  String(args.consumerGroup)],
+          ["State",           String(args.rebalanceState ?? "Rebalancing")],
+          ...(args.lagObserved ? [["Observed lag", String(args.lagObserved)] as [string, string]] : []),
+        ] as [string, string][],
+        impact: "Read-only · No cluster mutation, audit record only",
+        impactColor: "green",
+      };
+    default:
+      return {
+        emoji: "⚙️",
+        title: name.replace(/\./g, " › "),
+        summary: "Execute infrastructure action",
+        rows: Object.entries(args).map(([k, v]) => [k, String(v)]) as [string, string][],
+        impact: "Infrastructure mutation",
+        impactColor: "amber",
+      };
+  }
 }
 
 // ── Approval gate ─────────────────────────────────────────────────────────────
@@ -85,39 +209,225 @@ function ApprovalGate({ approvals, onDecide }: {
   onDecide: (id: string, d: "approve" | "reject") => void;
 }) {
   if (!approvals.length) return null;
+
   return (
-    <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white border border-amber-200 rounded-2xl shadow-2xl max-w-lg w-full p-6">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-lg">🔐</div>
-          <div>
-            <h2 className="text-base font-bold text-slate-800">Policy Gate</h2>
-            <p className="text-xs text-amber-600 font-medium">Approval required before action</p>
+    <div className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4
+                    animate-[fadeIn_0.2s_ease-out]">
+      {approvals.map((a) => {
+        const desc = describeToolCall(a.toolCall);
+        return (
+          <div key={a.id}
+            className="bg-white border border-amber-200 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden
+                       animate-[slideUp_0.25s_ease-out]">
+
+            {/* Header */}
+            <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white border border-amber-200 flex items-center justify-center text-xl shadow-sm">
+                🔐
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Policy Gate — Approval Required</h2>
+                <p className="text-xs text-amber-700 font-medium mt-0.5">
+                  This action mutates your Kafka cluster. Review carefully before approving.
+                </p>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5">
+              {/* Proposed action */}
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-2xl">{desc.emoji}</span>
+                <div>
+                  <div className="text-sm font-bold text-slate-800">{desc.title}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{desc.summary}</div>
+                </div>
+              </div>
+
+              {/* Parameters table */}
+              <div className="rounded-xl border border-slate-200 overflow-hidden mb-4">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {desc.rows.map(([label, value], i) => (
+                      <tr key={i} className={i < desc.rows.length - 1 ? "border-b border-slate-100" : ""}>
+                        <td className="px-4 py-2.5 text-xs text-slate-500 font-medium w-36 bg-slate-50">{label}</td>
+                        <td className="px-4 py-2.5 text-xs font-semibold text-slate-800 font-mono">{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Reason / rationale */}
+              {a.reason && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4">
+                  <div className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Why this action</div>
+                  <div className="text-sm text-blue-900 leading-relaxed">{a.reason}</div>
+                </div>
+              )}
+
+              {/* Impact note */}
+              <div className={clsx(
+                "rounded-xl px-4 py-2.5 text-xs font-medium mb-5",
+                desc.impactColor === "green"
+                  ? "bg-green-50 border border-green-200 text-green-700"
+                  : desc.impactColor === "blue"
+                  ? "bg-blue-50 border border-blue-200 text-blue-700"
+                  : "bg-amber-50 border border-amber-200 text-amber-700"
+              )}>
+                ⚡ {desc.impact}
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-3">
+                <button onClick={() => onDecide(a.id, "approve")}
+                  className="flex-1 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600
+                             text-white font-bold text-sm transition-colors shadow-sm">
+                  ✓ Approve
+                </button>
+                <button onClick={() => onDecide(a.id, "reject")}
+                  className="flex-1 py-3 rounded-xl bg-white hover:bg-red-50
+                             text-red-600 font-bold text-sm transition-colors border-2 border-red-200 hover:border-red-400">
+                  ✕ Reject — No Action
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Scenario-end modal (email sent / rejection notice) ────────────────────────
+
+function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: () => void }) {
+  if (!data.approved) {
+    // Rejection path
+    return (
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4
+                      animate-[fadeIn_0.2s_ease-out]">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-[slideUp_0.25s_ease-out]">
+          <div className="bg-red-50 border-b border-red-200 px-6 py-5 text-center">
+            <div className="text-4xl mb-2">🚫</div>
+            <h2 className="text-lg font-bold text-red-700">Action Rejected</h2>
+            <p className="text-sm text-red-600 mt-1">No further action was taken</p>
+          </div>
+          <div className="px-6 py-5">
+            <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 mb-5 space-y-1.5">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500 font-medium">Scenario</span>
+                <span className="text-slate-700 font-semibold">{data.scenarioLabel}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500 font-medium">Proposed action</span>
+                <span className="text-slate-700 font-mono">{data.action}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500 font-medium">Cluster modified</span>
+                <span className="font-bold text-red-600">No</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500 font-medium">Email sent</span>
+                <span className="font-bold text-slate-500">No</span>
+              </div>
+            </div>
+            <button onClick={onClose}
+              className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm transition-colors">
+              OK, understood
+            </button>
           </div>
         </div>
-        {approvals.map((a) => (
-          <div key={a.id} className="mb-4 bg-slate-50 rounded-xl p-4 border border-slate-200">
-            <div className="flex gap-4 mb-3 text-xs">
-              <span className="text-slate-500">Scenario: <span className="text-slate-800 font-semibold">{a.scenarioId}</span></span>
-              <span className="text-slate-500">Agent: <span className="text-slate-800 font-semibold">{a.agent}</span></span>
+      </div>
+    );
+  }
+
+  // Approved path — show email result
+  const emailOk    = data.sent;
+  const emailLabel = emailOk
+    ? "Sent to surajcs@gmail.com"
+    : data.emailError === "smtp_not_configured"
+    ? "Skipped — SMTP not configured in Vercel"
+    : data.emailError === "network_error"
+    ? "Failed — network error"
+    : `Failed — ${data.emailError ?? "unknown"}`;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4
+                    animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-[slideUp_0.25s_ease-out]">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 bg-white/20 rounded-xl flex items-center justify-center text-2xl">
+              {emailOk ? "✉️" : "✅"}
             </div>
-            <pre className="text-xs font-mono bg-white rounded-lg border border-slate-200 p-3 mb-4 overflow-x-auto text-slate-700 leading-relaxed">
-              {JSON.stringify(a.toolCall.params, null, 2)}
-            </pre>
-            <div className="flex gap-3">
-              <button onClick={() => onDecide(a.id, "approve")}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600
-                           text-white font-semibold text-sm transition-colors shadow-sm">
-                ✓ Approve
-              </button>
-              <button onClick={() => onDecide(a.id, "reject")}
-                className="flex-1 py-2.5 rounded-xl bg-red-100 hover:bg-red-200
-                           text-red-700 font-semibold text-sm transition-colors border border-red-200">
-                ✕ Reject
-              </button>
+            <div>
+              <h2 className="text-base font-bold text-white">Scenario Complete</h2>
+              <p className="text-xs text-blue-200 mt-0.5">{data.scenarioLabel}</p>
             </div>
           </div>
-        ))}
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5">
+          <div className="rounded-xl border border-slate-200 overflow-hidden mb-5">
+            <table className="w-full text-sm">
+              <tbody>
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-2.5 text-xs text-slate-500 font-medium bg-slate-50 w-32">Action taken</td>
+                  <td className="px-4 py-2.5 text-xs font-mono text-slate-800">{data.action}</td>
+                </tr>
+                {data.lagBefore > 0 && (
+                  <tr className="border-b border-slate-100">
+                    <td className="px-4 py-2.5 text-xs text-slate-500 font-medium bg-slate-50">Lag resolved</td>
+                    <td className="px-4 py-2.5 text-xs font-bold text-slate-800">
+                      {data.lagBefore.toLocaleString()} → {data.lagAfter.toLocaleString()} msgs
+                    </td>
+                  </tr>
+                )}
+                <tr className="border-b border-slate-100">
+                  <td className="px-4 py-2.5 text-xs text-slate-500 font-medium bg-slate-50">Outcome</td>
+                  <td className="px-4 py-2.5">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700
+                                     bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-0.5">
+                      ✅ SUCCESS
+                    </span>
+                  </td>
+                </tr>
+                {data.approvedBy && (
+                  <tr className="border-b border-slate-100">
+                    <td className="px-4 py-2.5 text-xs text-slate-500 font-medium bg-slate-50">Approved by</td>
+                    <td className="px-4 py-2.5 text-xs text-slate-700">{data.approvedBy}</td>
+                  </tr>
+                )}
+                <tr>
+                  <td className="px-4 py-2.5 text-xs text-slate-500 font-medium bg-slate-50">Email</td>
+                  <td className="px-4 py-2.5">
+                    <span className={clsx(
+                      "text-xs font-medium",
+                      emailOk ? "text-emerald-600" : "text-amber-600"
+                    )}>
+                      {emailOk ? "✉️ " : "⚠️ "}{emailLabel}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {!emailOk && data.emailError === "smtp_not_configured" && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-700">
+              <strong>To enable emails:</strong> add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and
+              NOTIFICATION_EMAIL in Vercel → Settings → Environment Variables, then redeploy.
+            </div>
+          )}
+
+          <button onClick={onClose}
+            className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm transition-colors shadow-sm">
+            Got it
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -195,7 +505,7 @@ function AuditLogPanel({ log }: { log: AuditRecord[] }) {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { state, trigger, approve, agentAction, reset } = useMeshStream();
+  const { state, trigger, approve, agentAction, reset, dismissEmailSummary } = useMeshStream();
   const phase = state.mralPhase ?? "idle";
 
   return (
@@ -249,6 +559,9 @@ export default function Dashboard() {
           <UserMenu />
         </div>
       </nav>
+
+      {/* ── Live activity banner — slides in when any agent is active ── */}
+      <LiveActivityBanner agents={state.agents} />
 
       {/* ── Main layout ── */}
       <div className="flex flex-1 gap-0 overflow-hidden">
@@ -385,6 +698,9 @@ export default function Dashboard() {
 
       {/* Overlays */}
       <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} />
+      {state.emailSummary && (
+        <ScenarioEndModal data={state.emailSummary} onClose={dismissEmailSummary} />
+      )}
       <ToastStack toasts={state.toasts} />
     </div>
   );
