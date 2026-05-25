@@ -623,7 +623,7 @@ export default function Dashboard() {
   const phase = state.mralPhase ?? "idle";
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    <div className="h-screen overflow-hidden bg-slate-100 flex flex-col">
 
       {/* ── Nav bar — professional deep blue ── */}
       <nav className="bg-blue-800 px-6 py-3 flex items-center justify-between sticky top-0 z-30 shadow-md">
