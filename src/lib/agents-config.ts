@@ -2,9 +2,9 @@
  * Static definitions for the four agents in the mesh.
  * Positions are tuned for the React Flow canvas.
  */
-import type { AgentDefinition, AgentId } from "./types";
+import type { AgentDefinition } from "./types";
 
-export const AGENTS: Record<AgentId, AgentDefinition> = {
+export const AGENTS: Record<string, AgentDefinition> = {
   "intake-agent": {
     id: "intake-agent",
     name: "Intake Agent",
@@ -63,7 +63,7 @@ export const AGENTS: Record<AgentId, AgentDefinition> = {
   },
 };
 
-export const AGENT_ORDER: AgentId[] = [
+export const AGENT_ORDER: string[] = [
   "intake-agent",
   "monitor-agent",
   "writer-agent",

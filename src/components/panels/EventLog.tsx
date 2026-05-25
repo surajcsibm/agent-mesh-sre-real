@@ -12,6 +12,10 @@ const AGENT_COLOR: Record<AgentId | "system", string> = {
   "monitor-agent": "#a78bfa",
   "writer-agent": "#34d399",
   "notification-agent": "#fbbf24",
+  intake: "#22d3ee",
+  monitor: "#a78bfa",
+  writer: "#34d399",
+  notification: "#fbbf24",
   system: "#94a3b8",
 };
 

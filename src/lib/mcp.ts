@@ -7,6 +7,7 @@ import type { AgentId } from "./types";
 export interface MCPTool {
   name:             string;
   description:      string;
+  owner?:           string;
   policyTags:       string[];
   requiresApproval: boolean;
   inputSchema:      object;
