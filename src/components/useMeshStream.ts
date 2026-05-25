@@ -5,6 +5,7 @@ import type {
   AgentState, BrokerState, MralPhase, ApprovalRequest,
   AuditRecord, LessonRecord, NotificationRecord, BusEvent,
 } from "@/lib/types";
+import { runClientScenario, type ScenarioKey, type SimAction } from "@/lib/client-sim";
 
 export interface MeshClientState {
   agents: AgentState[];
@@ -121,7 +122,17 @@ export function useMeshStream() {
   }, []);
 
   const trigger = async (scenarioId: string) => {
-    await fetch("/api/mesh/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: scenarioId }) });
+    // Always run the client-side simulation so Vercel deployments work
+    // (serverless instances don't share globalThis state, so SSE from a
+    // different instance won't carry the server-side events to this client).
+    runClientScenario(scenarioId as ScenarioKey, dispatch as (a: SimAction) => void);
+
+    // Also notify the server (fires real Kafka mutations when in REAL mode).
+    fetch("/api/mesh/scenario", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: scenarioId }),
+    }).catch(() => { /* server-side fire-and-forget; client sim already running */ });
   };
 
   const approve = async (id: string, decision: "approve" | "reject") => {
