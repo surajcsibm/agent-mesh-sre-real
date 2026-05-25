@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ReactFlow, Handle, Position } from "@xyflow/react";
 import type { Node, Edge, NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -12,6 +12,14 @@ const ACCENT: Record<string, string> = {
   monitor:      "#7c3aed",
   writer:       "#1D9E75",
   notification: "#f97316",
+};
+
+// Light background tints per agent (very soft, stays legible)
+const BG_LIGHT: Record<string, string> = {
+  intake:       "#e6f5f0",   // soft emerald
+  monitor:      "#ede9fe",   // soft violet
+  writer:       "#ecfdf5",   // soft mint
+  notification: "#fff7ed",   // soft orange
 };
 
 const DISPLAY_NAME: Record<string, string> = {
@@ -49,10 +57,14 @@ interface AgentNodeData extends Record<string, unknown> {
   onRestart: (id: string) => void;
 }
 
+const DIAMETER = 172;
+
 function AgentNode({ data: rawData }: NodeProps<Node<AgentNodeData>>) {
   const { agent, onKill, onRestart } = rawData as AgentNodeData;
+  const [confirmKill, setConfirmKill] = useState(false);
 
-  const accent     = ACCENT[agent.id]    ?? "#1D9E75";
+  const accent     = ACCENT[agent.id]        ?? "#1D9E75";
+  const bgLight    = BG_LIGHT[agent.id]      ?? "#f0faf6";
   const dotColor   = STATUS_DOT[agent.status] ?? "#94a3b8";
   const crashed    = agent.status === "crashed";
   const isActive   = ["reasoning", "acting"].includes(agent.status);
@@ -61,17 +73,23 @@ function AgentNode({ data: rawData }: NodeProps<Node<AgentNodeData>>) {
 
   return (
     <div style={{
-      width: 210,
-      background: "#ffffff",
-      border: `2.5px solid ${crashed ? "#fca5a5" : accent}`,
-      borderRadius: 14,
-      padding: "14px 14px 12px",
+      width:        DIAMETER,
+      height:       DIAMETER,
+      borderRadius: "50%",
+      background:   crashed ? "#fef2f2" : bgLight,
+      border:       `3px solid ${crashed ? "#fca5a5" : accent}`,
+      display:      "flex",
+      flexDirection:"column",
+      alignItems:   "center",
+      justifyContent:"center",
+      position:     "relative",
       boxShadow: (isActive || isAwaiting)
-        ? `0 0 0 4px ${glow}28, 0 8px 28px ${glow}25`
-        : "0 2px 10px rgba(30,58,95,0.09)",
-      transform: (isActive || isAwaiting) ? "scale(1.06)" : "scale(1)",
+        ? `0 0 0 7px ${glow}20, 0 8px 30px ${glow}22`
+        : "0 3px 14px rgba(30,58,95,0.10)",
+      transform:  (isActive || isAwaiting) ? "scale(1.09)" : "scale(1)",
       transition: "all 0.3s ease",
     }}>
+      {/* ReactFlow handles — invisible, on circle perimeter */}
       <Handle type="source" position={Position.Top}    id="st" style={H} />
       <Handle type="target" position={Position.Top}    id="tt" style={{ ...H, left: "60%" }} />
       <Handle type="source" position={Position.Right}  id="sr" style={H} />
@@ -81,50 +99,110 @@ function AgentNode({ data: rawData }: NodeProps<Node<AgentNodeData>>) {
       <Handle type="source" position={Position.Left}   id="sl" style={H} />
       <Handle type="target" position={Position.Left}   id="tl" style={{ ...H, top: "62%" }} />
 
-      {/* Name */}
+      {/* Agent name */}
       <div style={{
-        fontSize: 16, fontWeight: 800, letterSpacing: "0.6px",
-        color: accent, textTransform: "uppercase", marginBottom: 4, lineHeight: 1.3,
+        fontSize: 15, fontWeight: 800, letterSpacing: "0.5px",
+        color: accent, textTransform: "uppercase", lineHeight: 1.2,
+        textAlign: "center",
       }}>
         {DISPLAY_NAME[agent.id] ?? agent.id.toUpperCase()}
       </div>
 
       {/* Subtitle */}
-      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 13, lineHeight: 1.4 }}>
+      <div style={{
+        fontSize: 10, color: "#64748b", marginTop: 3, marginBottom: 8,
+        textAlign: "center", lineHeight: 1.3, padding: "0 14px",
+      }}>
         {SUBTITLE[agent.id] ?? agent.role}
       </div>
 
-      {/* Status dot — centred */}
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 7, marginBottom: 11 }}>
+      {/* Status badge */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
         <span style={{
-          width: 13, height: 13, borderRadius: "50%", background: dotColor,
-          display: "block", boxShadow: `0 0 0 5px ${dotColor}22`,
-          animation: "pulse 2s infinite",
+          width: 10, height: 10, borderRadius: "50%", background: dotColor,
+          display: "inline-block", boxShadow: `0 0 0 4px ${dotColor}22`,
+          animation: "pulse 2s infinite", flexShrink: 0,
         }} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: dotColor }}>
           {agent.status.replace(/-/g, " ")}
         </span>
       </div>
 
-      {/* Kill / Restart */}
-      {!crashed ? (
-        <button
-          onClick={() => onKill(agent.id)}
-          style={{
-            width: "100%", fontSize: 11, fontWeight: 700, padding: "5px 0",
-            background: "rgba(220,38,38,0.06)", color: "#dc2626",
-            border: "1px solid rgba(220,38,38,0.22)", borderRadius: 7, cursor: "pointer",
-          }}
-        >Kill</button>
-      ) : (
-        <button
-          onClick={() => onRestart(agent.id)}
-          style={{
-            width: "100%", fontSize: 11, fontWeight: 700, padding: "5px 0",
-            background: "rgba(29,158,117,0.08)", color: "#1D9E75",
-            border: "1px solid rgba(29,158,117,0.28)", borderRadius: 7, cursor: "pointer",
-          }}
-        >Restart</button>
+      {/* Kill / Restart — small button at bottom of circle */}
+      <div style={{ position: "absolute", bottom: 18 }}>
+        {!crashed ? (
+          <button
+            onClick={() => setConfirmKill(true)}
+            style={{
+              fontSize: 9, fontWeight: 700, padding: "2px 10px",
+              background: "rgba(220,38,38,0.07)", color: "#dc2626",
+              border: "1px solid rgba(220,38,38,0.25)", borderRadius: 20,
+              cursor: "pointer", letterSpacing: "0.3px",
+            }}
+          >
+            Kill
+          </button>
+        ) : (
+          <button
+            onClick={() => onRestart(agent.id)}
+            style={{
+              fontSize: 9, fontWeight: 700, padding: "2px 10px",
+              background: "rgba(29,158,117,0.10)", color: "#1D9E75",
+              border: "1px solid rgba(29,158,117,0.30)", borderRadius: 20,
+              cursor: "pointer",
+            }}
+          >
+            Restart
+          </button>
+        )}
+      </div>
+
+      {/* Kill confirmation popup — floats just below the circle */}
+      {confirmKill && (
+        <div style={{
+          position: "absolute",
+          top: "calc(100% + 10px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 999,
+          background: "#fff",
+          border: "2px solid #ef4444",
+          borderRadius: 14,
+          padding: "12px 16px",
+          boxShadow: "0 8px 28px rgba(220,38,38,0.20)",
+          minWidth: 160,
+          textAlign: "center",
+          animation: "slideDown 0.15s ease-out",
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>
+            Kill {DISPLAY_NAME[agent.id] ?? agent.id}?
+          </div>
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 10 }}>
+            Agent will stop processing immediately.
+          </div>
+          <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+            <button
+              onClick={() => { onKill(agent.id); setConfirmKill(false); }}
+              style={{
+                fontSize: 11, fontWeight: 700, padding: "4px 14px",
+                background: "#dc2626", color: "#fff",
+                border: "none", borderRadius: 8, cursor: "pointer",
+              }}
+            >
+              Yes, Kill
+            </button>
+            <button
+              onClick={() => setConfirmKill(false)}
+              style={{
+                fontSize: 11, fontWeight: 600, padding: "4px 12px",
+                background: "#f1f5f9", color: "#64748b",
+                border: "1px solid #dce5ef", borderRadius: 8, cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -191,11 +269,11 @@ const nodeTypes = { agent: AgentNode, broker: BrokerNode };
 //   [MONITOR]             [NOTIFY]
 //
 const NODE_POS: Record<string, { x: number; y: number }> = {
-  intake:       { x: 20,  y: 30  },
-  writer:       { x: 560, y: 30  },
-  broker:       { x: 274, y: 210 },
-  monitor:      { x: 20,  y: 390 },
-  notification: { x: 560, y: 390 },
+  intake:       { x: 10,  y: 10  },
+  writer:       { x: 570, y: 10  },
+  broker:       { x: 278, y: 200 },
+  monitor:      { x: 10,  y: 410 },
+  notification: { x: 570, y: 410 },
 };
 
 // ── Edge colours (inactive state, per wireframe accent colours) ───────────────
@@ -305,7 +383,7 @@ export default function AgentCanvas({ agents, broker, activeParticles, onKill, o
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.18, maxZoom: 1.15 }}
+        fitViewOptions={{ padding: 0.12, maxZoom: 1.0 }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
