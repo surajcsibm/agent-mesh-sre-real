@@ -110,8 +110,12 @@ export function useMeshStream() {
         const event = JSON.parse(e.data) as BusEvent & { auditLog?: AuditRecord[]; lessons?: LessonRecord[]; notifications?: NotificationRecord[]; scenarioRunning?: boolean };
         switch (event.type) {
           case "state":
+            // Strip pendingApprovals from SSE payloads — approvals are managed
+            // exclusively by client-sim. On localhost the Next.js dev server
+            // retains scenario state across page refreshes in globalThis, so the
+            // SSE stream would replay stale approvals and double-show the gate.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            dispatch({ type: "state", payload: event as any });
+            dispatch({ type: "state", payload: { ...(event as any), pendingApprovals: [] } });
             break;
           case "audit":
             dispatch({ type: "audit", record: event.record });

@@ -618,6 +618,516 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
   ]);
 }
 
+// ── Extra failure scenarios ───────────────────────────────────────────────────
+
+// 1. Schema Registry Mismatch — Avro producer v2 vs consumer v1
+function runSchemaMismatch(dispatch: DispatchFn): () => void {
+  let agents = baseAgents();
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+  function t(ms: number, fn: () => void) { allTimers.push(setTimeout(fn, ms)); }
+
+  const LAG = 8400;
+
+  t(0, () => {
+    agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 2, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("intake", "Avro deserialization failure alert on payments.transactions.v1 — schema id=15 received, id=12 expected", "publish", "ops.incidents.v1") });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "⚠️ Schema mismatch — payments.transactions.v1", "warning");
+  });
+
+  t(2000, () => {
+    agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
+      lastReasoning: { rootCause: "Schema Registry version conflict — Avro v2 vs v1", kafkaFeature: "Schema Registry", confidence: 0.93,
+        rationale: "Producers upgraded to Avro schema v2; consumers still registered for v1. BACKWARD compatibility not enforced in schema registry." } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 2, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Deserialization exception rate: 340/min on payment-processor group. Schema id=12 expected, id=15 received. BACKWARD compatibility broken.", "reasoning") });
+  });
+
+  t(4000, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "8,400 msgs queued · 340 DLQ writes/min · all partitions affected. Resolution: re-register schema v2 in BACKWARD_TRANSITIVE mode + hot-redeploy consumers.", "reasoning") });
+  });
+
+  t(6000, () => {
+    const toolCall: MCPToolCall = {
+      jsonrpc: "2.0", id: uid(), method: "tools/call",
+      params: { name: "kafka.updateSchemaCompatibility", arguments: { subject: "payments.transactions-value", fromVersion: 12, toVersion: 15, mode: "BACKWARD_TRANSITIVE" } },
+    };
+    const approval: ApprovalRequest = {
+      id: uid(), ts: Date.now(), createdAt: Date.now(), agent: "monitor", proposedBy: "monitor-agent",
+      toolCall, scenarioId: "schema-mismatch",
+      reason: "Schema mutation requires operator sign-off — affects all active consumers of payments.transactions.v1",
+      status: "pending",
+    };
+    agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(LAG), pendingApprovals: [approval], incidentQueueDepth: 2, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.updateSchemaCompatibility (schema mutation is policy-gated)", "approval") });
+    toast(dispatch, "⏳ Schema update approval required", "warning");
+
+    _pendingApprovalCallback = (approved) => {
+      if (approved) {
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 2, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Approved — executing kafka.updateSchemaCompatibility(BACKWARD_TRANSITIVE) + consumer hot-redeploy", "tool-call") });
+          particle(dispatch, "e-inc", "monitor", "writer");
+        }, 0));
+        allTimers.push(setTimeout(() => {
+          dispatch({ type: "audit", record: auditRec("monitor", "Schema compatibility updated to BACKWARD_TRANSITIVE. Consumers redeploying with dual-read (v1+v2) support. Lag draining at 720 msg/s.", "tool-call") });
+        }, 2200));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(300), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("writer", "Drafting schema compatibility incident postmortem — publishing to ops.actions.audit.v1", "consume", "ops.incidents.v1") });
+          particle(dispatch, "e-aud", "writer", "notification");
+        }, 4000));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
+          agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("notification", "Slack #schema-alerts + ITSM ticket opened for schema compatibility incident", "notification") });
+          dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Schema Mismatch Resolved", message: "✅ Schema v2 BACKWARD_TRANSITIVE applied — consumers healthy, lag 8400→0", scenarioId: "schema-mismatch" } });
+          sendEmail(dispatch, "schema-mismatch", "Schema Registry Mismatch", LAG, 0, "kafka.updateSchemaCompatibility(BACKWARD_TRANSITIVE)", {
+            approved: true, approvedBy: "operator",
+            reasoning: { rootCause: "Avro schema v2 deployed without BACKWARD_TRANSITIVE mode — broke consumers on payments.transactions.v1", confidence: 0.93, kafkaFeature: "Schema Registry", rationale: "Re-registered v2 schema in BACKWARD_TRANSITIVE mode; consumers hot-redeployed with dual-read support." },
+            lesson: { notes: "Always register new Avro schemas in BACKWARD_TRANSITIVE mode before deploying producers. Gate producer releases on schema compatibility check." },
+            slackMessage: "✅ Schema mismatch resolved on payments.transactions.v1 — lag 8400→0",
+            itsmTicket: `INC-${Date.now().toString().slice(-5)} — Schema Registry Mismatch`,
+          });
+        }, 6000));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
+          agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Lesson persisted: Always use BACKWARD_TRANSITIVE for schema evolution. Gate producer releases on registry validation.", "lesson") });
+          dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "schema-mismatch", actionTaken: "kafka.updateSchemaCompatibility", notes: "Use BACKWARD_TRANSITIVE; validate schemas pre-deploy." } });
+        }, 8500));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+        }, 10500));
+      } else {
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Schema update rejected — manual schema rollback required", "approval") });
+          sendEmail(dispatch, "schema-mismatch", "Schema Registry Mismatch", LAG, LAG, "Rejected — no schema change applied", { approved: false, approvedBy: "operator" });
+        }, 0));
+      }
+    };
+  });
+
+  return () => allTimers.forEach(clearTimeout);
+}
+
+// 2. Disk Saturation — broker log disk >92%, compaction falling behind
+function runDiskSaturation(dispatch: DispatchFn): () => void {
+  let agents = baseAgents();
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+  function t(ms: number, fn: () => void) { allTimers.push(setTimeout(fn, ms)); }
+
+  t(0, () => {
+    agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("intake", "Broker-2 disk utilisation 92.4% — log compaction falling behind, segment accumulation detected", "publish", "ops.incidents.v1") });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "🔴 Disk saturation on broker-2 (92.4%)", "error");
+  });
+
+  t(2000, () => {
+    agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
+      lastReasoning: { rootCause: "Uncompacted segment accumulation on broker-2", kafkaFeature: "Log Compaction", confidence: 0.91,
+        rationale: "log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1 (target 0.5). 12GB uncompacted segments in last 6h." } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Root cause: log.cleaner.threads=1 saturated. Dirty ratio 0.78 on invoices.created.v1 (threshold 0.5). 12GB uncompacted in 6h.", "reasoning") });
+  });
+
+  t(4200, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Action plan: (1) Increase log.cleaner.threads to 4 (2) Force-compact invoices.created.v1 (3) Adjust retention.bytes for safety headroom.", "reasoning") });
+  });
+
+  t(6200, () => {
+    agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "kafka.updateBrokerConfig(broker=2, log.cleaner.threads=4) · kafka.forceCompact(topic=invoices.created.v1)", "tool-call") });
+    particle(dispatch, "e-inc", "monitor", "writer");
+  });
+
+  t(8500, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Compaction throughput ↑ 4×. Disk utilisation declining: 92.4%→81.2% over 8 min. Retention.bytes set to 85% of disk capacity.", "tool-call") });
+  });
+
+  t(10500, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("writer", "Disk saturation postmortem drafted — publishing to ops.actions.audit.v1", "consume", "ops.incidents.v1") });
+    particle(dispatch, "e-aud", "writer", "notification");
+  });
+
+  t(13000, () => {
+    agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("notification", "Slack #sre-infra: disk saturation resolved. ITSM INC auto-closed.", "notification") });
+    dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Disk Saturation Resolved", message: "✅ Broker-2 disk: 92.4%→81.2% · compaction threads ×4 · headroom restored", scenarioId: "disk-saturation" } });
+    sendEmail(dispatch, "disk-saturation", "Broker Disk Saturation", 0, 0, "kafka.updateBrokerConfig + kafka.forceCompact", {
+      reasoning: { rootCause: "log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1", confidence: 0.91, kafkaFeature: "Log Compaction", rationale: "Increased cleaner threads to 4, forced compaction. Disk 92.4%→81.2% in 8 min." },
+      lesson: { notes: "Set log.retention.bytes with 20% headroom. Alert at dirty-ratio > 0.6. Use 2+ cleaner threads on high-volume topics." },
+      slackMessage: "✅ Broker-2 disk saturation resolved — 92.4%→81.2%",
+      itsmTicket: `INC-${Date.now().toString().slice(-5)} — Broker Disk Saturation`,
+    });
+  });
+
+  t(15500, () => {
+    agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Lesson: alert at dirty-ratio > 0.6 and disk > 80%. Run 2+ cleaner threads; set retention.bytes = 0.85 × disk.", "lesson") });
+    dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "disk-saturation", actionTaken: "kafka.forceCompact + increaseCleanerThreads", notes: "Alert at dirty-ratio>0.6. 2+ cleaner threads required." } });
+  });
+
+  t(17500, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+  });
+
+  return () => allTimers.forEach(clearTimeout);
+}
+
+// 3. Under-Replication — ISR drops below minISR on settlements topic
+function runUnderReplication(dispatch: DispatchFn): () => void {
+  let agents = baseAgents();
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+  function t(ms: number, fn: () => void) { allTimers.push(setTimeout(fn, ms)); }
+
+  const LAG = 18900;
+
+  t(0, () => {
+    agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 3, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("intake", "CRITICAL: payments.settlements.v1 ISR=1, minISR=2 — broker-3 replica DEAD, producer acks blocked", "publish", "ops.incidents.v1") });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "🔴 Under-replicated partitions — settlements topic", "error");
+  });
+
+  t(2200, () => {
+    agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
+      lastReasoning: { rootCause: "Broker-3 OOM crash — ISR shrunk to 1, minISR=2 violated", kafkaFeature: "KRaft ISR Management", confidence: 0.97,
+        rationale: "Broker-3 suffered JVM OOM. ISR on payments.settlements.v1 dropped to 1/3. Producers receiving NotEnoughReplicasException. Settlement batches at risk." } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 3, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Broker-3 OOM. ISR: 3→1 on payments.settlements.v1 (all 4 partitions). Producers blocked on acks=all. 18,900 msg backlog.", "reasoning") });
+  });
+
+  t(4500, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Resolution: reassign under-replicated partitions to broker-1 (headroom 34%). Broker-3 recovery ETA: 8 min after restart.", "reasoning") });
+  });
+
+  t(6500, () => {
+    const toolCall: MCPToolCall = {
+      jsonrpc: "2.0", id: uid(), method: "tools/call",
+      params: { name: "kafka.reassignPartitions", arguments: { topic: "payments.settlements.v1", fromBroker: 3, toBroker: 1, partitions: [0, 1, 2, 3] } },
+    };
+    const approval: ApprovalRequest = {
+      id: uid(), ts: Date.now(), createdAt: Date.now(), agent: "monitor", proposedBy: "monitor-agent",
+      toolCall, scenarioId: "under-replication",
+      reason: "Partition reassignment is an irreversible cluster mutation — operator confirmation required",
+      status: "pending",
+    };
+    agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(LAG), pendingApprovals: [approval], incidentQueueDepth: 3, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.reassignPartitions — partition mutation requires operator sign-off", "approval") });
+    toast(dispatch, "⏳ Partition reassignment approval required", "warning");
+
+    _pendingApprovalCallback = (approved) => {
+      if (approved) {
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 3, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Approved — executing kafka.reassignPartitions(settlements.v1, broker-3→broker-1, partitions=[0,1,2,3])", "tool-call") });
+          particle(dispatch, "e-inc", "monitor", "writer");
+        }, 0));
+        allTimers.push(setTimeout(() => {
+          dispatch({ type: "audit", record: auditRec("monitor", "Reassignment complete. ISR restored to 3/3. Lag draining: 18,900→6,200 at 3,100 msg/s. Producer acks unblocked.", "tool-call") });
+        }, 2500));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(800), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("writer", "Under-replication RCA drafted — publishing to ops.actions.audit.v1", "consume", "ops.incidents.v1") });
+          particle(dispatch, "e-aud", "writer", "notification");
+        }, 4500));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
+          agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("notification", "PagerDuty SEV-1 auto-resolved. Slack #sre-critical: ISR restored.", "notification") });
+          dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "itsm", title: "Under-Replication Resolved", message: "✅ payments.settlements.v1 ISR restored 1→3. Lag 18,900→0. SEV-1 resolved.", scenarioId: "under-replication" } });
+          sendEmail(dispatch, "under-replication", "Under-Replicated Partitions", LAG, 0, "kafka.reassignPartitions(broker-3→broker-1)", {
+            approved: true, approvedBy: "operator",
+            reasoning: { rootCause: "Broker-3 JVM OOM — ISR on payments.settlements.v1 shrunk to 1 (minISR=2)", confidence: 0.97, kafkaFeature: "KRaft ISR Management", rationale: "Reassigned 4 partitions to broker-1. ISR restored. Lag fully drained." },
+            lesson: { notes: "Set JVM heap to 70% of RAM with -XX:+UseG1GC. Alert at ISR < minISR within 30s. Keep broker-3 headroom >30%." },
+            slackMessage: "✅ payments.settlements.v1 ISR restored 1→3. Settlement batches resuming.",
+            itsmTicket: `SEV1-${Date.now().toString().slice(-5)} — Under-Replicated Partitions AUTO-RESOLVED`,
+          });
+        }, 6500));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
+          agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Lesson: JVM heap G1GC tuning prevents OOM. ISR alert SLO: 30s. Maintain broker headroom >30%.", "lesson") });
+          dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "under-replication", actionTaken: "kafka.reassignPartitions", notes: "G1GC + ISR alert within 30s." } });
+        }, 9000));
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+        }, 11000));
+      } else {
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Partition reassignment rejected — under-replication persists, manual intervention needed", "approval") });
+          sendEmail(dispatch, "under-replication", "Under-Replicated Partitions", LAG, LAG, "Rejected — no partition reassignment", { approved: false, approvedBy: "operator" });
+        }, 0));
+      }
+    };
+  });
+
+  return () => allTimers.forEach(clearTimeout);
+}
+
+// 4. Producer Timeout Storm — batch accumulator exhausted, linger.ms backpressure
+function runProducerTimeout(dispatch: DispatchFn): () => void {
+  let agents = baseAgents();
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+  function t(ms: number, fn: () => void) { allTimers.push(setTimeout(fn, ms)); }
+
+  t(0, () => {
+    agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(2100), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("intake", "Producer timeout storm on payments-gateway: record-queue-time P99 > 4,800ms, batch accumulator full", "publish", "ops.incidents.v1") });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "⚠️ Producer timeout storm — payments-gateway", "warning");
+  });
+
+  t(2000, () => {
+    agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
+      lastReasoning: { rootCause: "Producer batch accumulator exhausted — linger.ms/batch.size mismatch under peak load", kafkaFeature: "Producer Config", confidence: 0.89,
+        rationale: "batch.size=65536 (64KB) and linger.ms=5 causing 340 batches/s to exhaust accumulator at 1.2× normal throughput. Record-queue-time P99 hit 4.8s." } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(2100), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "record-queue-time P99: 4.8s (SLO: 500ms). batch.size 64KB saturated at 340 batches/s peak. buffer.memory 80% consumed.", "reasoning") });
+  });
+
+  t(4000, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Fix: increase batch.size to 2MB and linger.ms to 20ms. This reduces batch frequency by 32× while improving throughput and reducing broker I/O pressure.", "reasoning") });
+  });
+
+  t(6000, () => {
+    agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(2100), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "kafka.tuneProducerConfig(client=payments-gateway, batch.size=2097152, linger.ms=20, buffer.memory=67108864)", "tool-call") });
+    particle(dispatch, "e-inc", "monitor", "writer");
+  });
+
+  t(8000, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Config applied. record-queue-time P99 dropping: 4.8s→620ms→180ms. Batch efficiency ↑ 28×. Lag clearing.", "tool-call") });
+  });
+
+  t(10200, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("writer", "Producer tuning incident report drafted — publishing to ops.actions.audit.v1", "consume", "ops.incidents.v1") });
+    particle(dispatch, "e-aud", "writer", "notification");
+  });
+
+  t(12500, () => {
+    agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("notification", "Slack #producer-ops: timeout storm resolved. Config change documented in runbook.", "notification") });
+    dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Producer Timeout Resolved", message: "✅ payments-gateway P99 queue-time 4.8s→180ms · batch.size 64KB→2MB", scenarioId: "producer-timeout" } });
+    sendEmail(dispatch, "producer-timeout", "Producer Timeout Storm", 2100, 0, "kafka.tuneProducerConfig(batch.size=2MB, linger.ms=20)", {
+      reasoning: { rootCause: "batch.size=64KB exhausted under 1.2× peak throughput on payments-gateway", confidence: 0.89, kafkaFeature: "Producer Config", rationale: "Increased batch.size to 2MB and linger.ms to 20ms — 28× batch efficiency gain, P99 4.8s→180ms." },
+      lesson: { notes: "Set batch.size=2MB and linger.ms=15-20ms for high-throughput producers. Alert on record-queue-time P99 > 500ms." },
+      slackMessage: "✅ Producer timeout storm resolved — P99 queue-time 4.8s→180ms",
+      itsmTicket: `INC-${Date.now().toString().slice(-5)} — Producer Timeout Storm`,
+    });
+  });
+
+  t(15000, () => {
+    agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Lesson: batch.size=2MB + linger.ms=20 for high-throughput producers. Alert on record-queue-time P99>500ms.", "lesson") });
+    dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "producer-timeout", actionTaken: "kafka.tuneProducerConfig", notes: "batch.size 2MB + linger.ms 20 for peak traffic." } });
+  });
+
+  t(17000, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+  });
+
+  return () => allTimers.forEach(clearTimeout);
+}
+
+// 5. Consumer Group Session Timeout — GC pause causes heartbeat miss
+function runConsumerSessionTimeout(dispatch: DispatchFn): () => void {
+  let agents = baseAgents();
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+  function t(ms: number, fn: () => void) { allTimers.push(setTimeout(fn, ms)); }
+
+  t(0, () => {
+    agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(3400), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("intake", "Group coordinator heartbeat miss on payment-processor (3 members) — session.timeout.ms=10000 exceeded by GC pause", "publish", "ops.incidents.v1") });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "⚠️ Consumer group session timeout storm", "warning");
+  });
+
+  t(2200, () => {
+    agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
+      lastReasoning: { rootCause: "JVM GC pause (P99: 12.4s) exceeds session.timeout.ms=10s on payment-processor", kafkaFeature: "Consumer Group Protocol", confidence: 0.92,
+        rationale: "payment-processor instances running CMS GC with 4GB heap. GC pause P99 12.4s > session.timeout 10s. Group coordinator evicting members every ~90s." } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(3400), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "GC pause P99=12.4s on payment-processor instances. session.timeout=10s evicts members. Triggers full rebalance · 3,400 msg lag spike per event.", "reasoning") });
+  });
+
+  t(4500, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Fix: increase session.timeout.ms to 45s, heartbeat.interval.ms to 15s. Switch to G1GC. Fixes heartbeat miss without hiding real failures.", "reasoning") });
+  });
+
+  t(6500, () => {
+    agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(3400), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "kafka.updateConsumerConfig(group=payment-processor, session.timeout.ms=45000, heartbeat.interval.ms=15000)", "tool-call") });
+    particle(dispatch, "e-inc", "monitor", "writer");
+  });
+
+  t(8500, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Config applied. Heartbeat miss rate: 12/hour→0. Rebalance frequency dropped from 40/hour→2/hour. Lag clearing.", "tool-call") });
+  });
+
+  t(10500, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("writer", "Consumer session timeout runbook updated — publishing to ops.actions.audit.v1", "consume", "ops.incidents.v1") });
+    particle(dispatch, "e-aud", "writer", "notification");
+  });
+
+  t(13000, () => {
+    agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("notification", "Slack #consumer-ops: session timeout resolved. G1GC migration ticket opened.", "notification") });
+    dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Session Timeout Resolved", message: "✅ payment-processor rebalance storm resolved · session.timeout 10s→45s · lag clear", scenarioId: "consumer-session-timeout" } });
+    sendEmail(dispatch, "consumer-session-timeout", "Consumer Session Timeout Storm", 3400, 0, "kafka.updateConsumerConfig(session.timeout.ms=45000)", {
+      reasoning: { rootCause: "GC pause P99=12.4s exceeds session.timeout.ms=10s on payment-processor group", confidence: 0.92, kafkaFeature: "Consumer Group Protocol", rationale: "Increased session.timeout to 45s and heartbeat.interval to 15s. Rebalance storm eliminated." },
+      lesson: { notes: "Set session.timeout.ms = 3× GC pause P99. Use G1GC to keep pauses <1s. Alert on rebalance rate >5/hour." },
+      slackMessage: "✅ Consumer session timeout resolved — rebalance storm stopped",
+      itsmTicket: `INC-${Date.now().toString().slice(-5)} — Consumer Session Timeout Storm`,
+    });
+  });
+
+  t(15500, () => {
+    agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Lesson: session.timeout = 3× GC P99. G1GC migration scheduled. Alert threshold: rebalance rate >5/hour.", "lesson") });
+    dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "consumer-session-timeout", actionTaken: "kafka.updateConsumerConfig", notes: "session.timeout = 3× GC P99; switch to G1GC." } });
+  });
+
+  t(17500, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+  });
+
+  return () => allTimers.forEach(clearTimeout);
+}
+
+// 6. Compaction Lag — __consumer_offsets and invoice topic cleaner threads saturated
+function runCompactionLag(dispatch: DispatchFn): () => void {
+  let agents = baseAgents();
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+  function t(ms: number, fn: () => void) { allTimers.push(setTimeout(fn, ms)); }
+
+  t(0, () => {
+    agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("intake", "Log compaction lag alert: invoices.created.v1 uncompacted ratio 0.82 (threshold 0.5) · __consumer_offsets cleaner queue depth: 240", "publish", "ops.incidents.v1") });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "⚠️ Compaction lag — invoices topic growing unbounded", "warning");
+  });
+
+  t(2000, () => {
+    agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
+      lastReasoning: { rootCause: "Cleaner thread backlog — tombstone write rate exceeds compaction throughput", kafkaFeature: "Log Compaction", confidence: 0.88,
+        rationale: "invoices.created.v1 tombstone write rate 8,000/min exceeds cleaner throughput of 5,200/min. __consumer_offsets compaction queue depth 240 (healthy: <20)." } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Tombstone write rate 8,000/min > cleaner capacity 5,200/min. Queue depth 240. Topic size growing 2.1GB/day. Retention at risk.", "reasoning") });
+  });
+
+  t(4000, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Fix: increase log.cleaner.threads 2→6, reduce min.compaction.lag.ms 86400000→3600000 (1h), adjust min.cleanable.dirty.ratio to 0.3.", "reasoning") });
+  });
+
+  t(6200, () => {
+    agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "kafka.updateTopicConfig(topic=invoices.created.v1, min.compaction.lag.ms=3600000, min.cleanable.dirty.ratio=0.3) + log.cleaner.threads=6", "tool-call") });
+    particle(dispatch, "e-inc", "monitor", "writer");
+  });
+
+  t(8500, () => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Cleaner throughput ↑ 3×: 5,200→15,600/min. Queue depth dropping: 240→87→12. Topic growth rate normalising.", "tool-call") });
+  });
+
+  t(10500, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("writer", "Compaction lag postmortem drafted — publishing to ops.actions.audit.v1", "consume", "ops.incidents.v1") });
+    particle(dispatch, "e-aud", "writer", "notification");
+  });
+
+  t(13000, () => {
+    agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("notification", "Slack #kafka-ops: compaction lag resolved. Runbook updated with cleaner tuning guide.", "notification") });
+    dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Compaction Lag Resolved", message: "✅ invoices.created.v1 cleaner queue 240→12 · topic growth normalised", scenarioId: "compaction-lag" } });
+    sendEmail(dispatch, "compaction-lag", "Log Compaction Lag", 0, 0, "kafka.updateTopicConfig(min.compaction.lag.ms=1h, cleanerThreads=6)", {
+      reasoning: { rootCause: "Tombstone write rate 8,000/min exceeded cleaner throughput 5,200/min on invoices.created.v1", confidence: 0.88, kafkaFeature: "Log Compaction", rationale: "Increased cleaner threads 2→6. Queue depth 240→12. Topic growth rate normalised." },
+      lesson: { notes: "Monitor log.cleaner.backoff.ms and queue depth. Alert when uncompacted ratio >0.5. Run 4+ cleaner threads on compacted topics." },
+      slackMessage: "✅ Compaction lag resolved — invoices.created.v1 cleaner queue 240→12",
+      itsmTicket: `INC-${Date.now().toString().slice(-5)} — Log Compaction Lag`,
+    });
+  });
+
+  t(15500, () => {
+    agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Lesson: 4+ cleaner threads for compacted topics. Alert: uncompacted ratio >0.5. min.compaction.lag.ms = 1h for invoicing topics.", "lesson") });
+    dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "compaction-lag", actionTaken: "kafka.updateTopicConfig + increaseCleanerThreads", notes: "4+ cleaner threads, alert at dirty-ratio>0.5." } });
+  });
+
+  t(17500, () => {
+    agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+  });
+
+  return () => allTimers.forEach(clearTimeout);
+}
+
 // ── Topic management scenario ─────────────────────────────────────────────────
 // Triggered when user edits, deletes, or creates a Kafka topic via the
 // Topics panel. Runs a full MRAL cycle: Monitor detects the change, reasons
@@ -757,14 +1267,19 @@ export type ScenarioKey = string;
 
 export function runClientScenario(key: ScenarioKey, dispatch: DispatchFn): () => void {
   switch (key) {
-    case "lag-spike":              return runLagSpike(dispatch);
-    case "controller-failover":    return runControllerFailover(dispatch);
-    // Dashboard uses "share-group" (not "share-group-rebalance")
+    case "lag-spike":                  return runLagSpike(dispatch);
+    case "controller-failover":        return runControllerFailover(dispatch);
     case "share-group":
-    case "share-group-rebalance":  return runShareGroupRebalance(dispatch);
-    // Dashboard uses "benign-rebalance" (not "partition-imbalance")
+    case "share-group-rebalance":      return runShareGroupRebalance(dispatch);
     case "benign-rebalance":
-    case "partition-imbalance":    return runBenignRebalance(dispatch);
+    case "partition-imbalance":        return runBenignRebalance(dispatch);
+    // Extra scenarios
+    case "schema-mismatch":            return runSchemaMismatch(dispatch);
+    case "disk-saturation":            return runDiskSaturation(dispatch);
+    case "under-replication":          return runUnderReplication(dispatch);
+    case "producer-timeout":           return runProducerTimeout(dispatch);
+    case "consumer-session-timeout":   return runConsumerSessionTimeout(dispatch);
+    case "compaction-lag":             return runCompactionLag(dispatch);
     default:
       console.warn("[client-sim] unknown scenario key:", key);
       return () => {};

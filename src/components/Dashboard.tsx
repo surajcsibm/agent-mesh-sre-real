@@ -6,18 +6,31 @@ import type { ApprovalRequest, AuditRecord, MCPToolCall, AgentState } from "@/li
 import type { EmailSummaryData, TopicChangePayload } from "./useMeshStream";
 import clsx from "clsx";
 import { useSession, signOut } from "next-auth/react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const AgentCanvas = dynamic(() => import("./AgentCanvas"), { ssr: false });
 
 // ── Scenario definitions ──────────────────────────────────────────────────────
 
-const SCENARIOS = [
+// Top-4 always pinned; EXTRA_SCENARIOS scrolls below them
+const PINNED_SCENARIOS = [
   { id: "lag-spike",           label: "Consumer Lag Spike",         badge: "KIP-848", color: "#2563eb" },
   { id: "controller-failover", label: "KRaft Controller Failover",  badge: "KRaft",   color: "#7c3aed" },
   { id: "share-group",         label: "Share Group Rebalance",      badge: "KIP-932", color: "#ea580c" },
   { id: "benign-rebalance",    label: "False-Positive Suppression", badge: "KIP-848", color: "#16a34a" },
 ] as const;
+
+const EXTRA_SCENARIOS = [
+  { id: "schema-mismatch",          label: "Schema Registry Mismatch",   badge: "Avro",    color: "#7c3aed" },
+  { id: "disk-saturation",          label: "Broker Disk Saturation",      badge: "I/O",     color: "#dc2626" },
+  { id: "under-replication",        label: "Under-Replicated Partitions", badge: "ISR",     color: "#b91c1c" },
+  { id: "producer-timeout",         label: "Producer Timeout Storm",      badge: "Batch",   color: "#d97706" },
+  { id: "consumer-session-timeout", label: "Consumer Session Timeout",    badge: "GC",      color: "#4f46e5" },
+  { id: "compaction-lag",           label: "Log Compaction Lag",          badge: "Compact", color: "#0891b2" },
+] as const;
+
+// Keep backward compat for any code that still iterates SCENARIOS
+const SCENARIOS = [...PINNED_SCENARIOS, ...EXTRA_SCENARIOS];
 
 // ── Semantic colour maps ──────────────────────────────────────────────────────
 
@@ -528,16 +541,15 @@ function UserMenu() {
 function AuditLogPanel({ log }: { log: AuditRecord[] }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">
-        Audit Log <span className="text-slate-300 font-normal normal-case">({log.length})</span>
+      <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 px-1">
+        Audit Log <span className="text-slate-400 font-normal normal-case">({log.length})</span>
       </div>
-      <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5">
+      <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
         {[...log].reverse().map((r) => (
           <div key={r.id}
-            className="rounded-lg bg-slate-50 border border-slate-100 px-2.5 py-2">
-            {/* Type badge + agent */}
-            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-              <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
+            className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
                 style={{
                   background: (AUDIT_COLOR[r.type] ?? "#94a3b8") + "18",
                   color:       AUDIT_COLOR[r.type] ?? "#94a3b8",
@@ -545,16 +557,15 @@ function AuditLogPanel({ log }: { log: AuditRecord[] }) {
                 }}>
                 {r.type}
               </span>
-              <span className="text-[9px] font-semibold text-slate-400 shrink-0">[{r.agent}]</span>
+              <span className="text-[10px] font-semibold text-slate-400 shrink-0">[{r.agent}]</span>
             </div>
-            {/* Full summary — wraps, no truncation */}
-            <div className="text-[10px] text-slate-600 leading-snug break-words whitespace-normal">
+            <div className="text-xs text-slate-600 leading-relaxed break-words whitespace-normal">
               {r.summary}
             </div>
           </div>
         ))}
         {log.length === 0 && (
-          <p className="text-[11px] text-slate-400 italic px-1 pt-2">No events yet — trigger a scenario.</p>
+          <p className="text-xs text-slate-400 italic px-1 pt-2">No events yet — trigger a scenario.</p>
         )}
       </div>
     </div>
@@ -613,9 +624,9 @@ function AgentLiveFeed({ log, agents, running, hidden }: {
         )}
 
         {/* Key event cards */}
-        <div className="p-2 space-y-1.5 max-h-72 overflow-y-auto">
+        <div className="p-2.5 space-y-2 max-h-72 overflow-y-auto">
           {keyEvents.length === 0 ? (
-            <p className="text-[10px] text-slate-400 italic px-1 py-1">Initialising…</p>
+            <p className="text-xs text-slate-400 italic px-1 py-1">Initialising…</p>
           ) : keyEvents.map((r) => (
             <div key={r.id}
               className="rounded-lg px-2.5 py-2 border"
@@ -623,8 +634,8 @@ function AgentLiveFeed({ log, agents, running, hidden }: {
                 background:   (AUDIT_COLOR[r.type] ?? "#94a3b8") + "09",
                 borderColor:  (AUDIT_COLOR[r.type] ?? "#94a3b8") + "28",
               }}>
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
                   style={{
                     background: (AUDIT_COLOR[r.type] ?? "#94a3b8") + "20",
                     color:      AUDIT_COLOR[r.type] ?? "#94a3b8",
@@ -632,9 +643,9 @@ function AgentLiveFeed({ log, agents, running, hidden }: {
                   }}>
                   {r.type}
                 </span>
-                <span className="text-[8px] text-slate-400">[{r.agent}]</span>
+                <span className="text-[9px] text-slate-500 font-medium">[{r.agent}]</span>
               </div>
-              <div className="text-[10px] text-slate-600 leading-snug break-words whitespace-normal">
+              <div className="text-xs text-slate-600 leading-relaxed break-words whitespace-normal">
                 {r.summary}
               </div>
             </div>
@@ -664,26 +675,25 @@ function LiveEventsFeed({ log, running, hidden }: {
                     border border-blue-100 rounded-lg animate-[fadeIn_0.15s_ease-out]">
 
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-100 shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-blue-100 shrink-0">
         <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />
-        <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">
+        <span className="text-xs font-bold text-blue-600 uppercase tracking-widest">
           Live Activity
         </span>
-        <span className="ml-auto text-[10px] text-blue-300 font-normal">
+        <span className="ml-auto text-xs text-blue-400 font-normal">
           {log.length} events
         </span>
       </div>
 
       {/* Cards */}
-      <div className="flex-1 overflow-y-auto space-y-1.5 p-2.5 pr-2">
+      <div className="flex-1 overflow-y-auto space-y-2 p-3 pr-2">
         {recent.length === 0 ? (
-          <p className="text-[11px] text-blue-300 italic px-1 pt-2">Waiting for events…</p>
+          <p className="text-xs text-blue-400 italic px-1 pt-2">Waiting for events…</p>
         ) : recent.map((r) => (
           <div key={r.id}
-            className="rounded-lg bg-white border border-blue-100 px-2.5 py-2 shadow-sm">
-            {/* Type badge + agent */}
-            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-              <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
+            className="rounded-lg bg-white border border-blue-100 px-3 py-2.5 shadow-sm">
+            <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
                 style={{
                   background: (AUDIT_COLOR[r.type] ?? "#94a3b8") + "18",
                   color:       AUDIT_COLOR[r.type] ?? "#94a3b8",
@@ -691,10 +701,9 @@ function LiveEventsFeed({ log, running, hidden }: {
                 }}>
                 {r.type}
               </span>
-              <span className="text-[9px] font-semibold text-slate-400 shrink-0">[{r.agent}]</span>
+              <span className="text-[10px] font-semibold text-slate-500 shrink-0">[{r.agent}]</span>
             </div>
-            {/* Full summary — no truncation */}
-            <div className="text-[10px] text-slate-600 leading-snug break-words whitespace-normal">
+            <div className="text-xs text-slate-600 leading-relaxed break-words whitespace-normal">
               {r.summary}
             </div>
           </div>
@@ -787,43 +796,55 @@ const TOPIC_STATUS_STYLE: Record<KafkaTopic["status"], { dot: string; text: stri
 // ── Topics panel — in left sidebar ───────────────────────────────────────────
 
 function TopicsPanel({
-  topics, onSelect,
+  topics, prevLagRef, onSelect,
 }: {
   topics: KafkaTopic[];
+  prevLagRef: React.MutableRefObject<Record<string, number>>;
   onSelect: (t: KafkaTopic) => void;
 }) {
   return (
     <div>
-      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-3">
         Kafka Topics
-        <span className="ml-1.5 text-slate-300 font-normal normal-case">({topics.length})</span>
+        <span className="ml-1.5 text-slate-400 font-normal normal-case">({topics.length})</span>
       </div>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {topics.map((t) => {
           const st = TOPIC_STATUS_STYLE[t.status];
+          const prevLag = prevLagRef.current[t.id] ?? t.lagTotal;
+          const lagTrend = t.lagTotal > prevLag + 50 ? "▲" : t.lagTotal < prevLag - 50 ? "▼" : null;
+          const trendColor = lagTrend === "▲" ? "text-red-500" : "text-emerald-500";
+          // Update ref for next render
+          prevLagRef.current[t.id] = t.lagTotal;
+
           return (
             <button
               key={t.id}
               onClick={() => onSelect(t)}
-              className="w-full text-left rounded-xl p-2.5 border transition-all
+              className="w-full text-left rounded-xl p-3 border transition-all
                          bg-white border-slate-200 hover:border-blue-400 hover:bg-blue-50
                          shadow-sm group"
             >
-              <div className="flex items-center justify-between gap-1 mb-1">
-                <span className="text-[9px] font-bold text-slate-700 group-hover:text-blue-800 leading-tight truncate">
+              <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                <span className="text-[11px] font-bold text-slate-700 group-hover:text-blue-800 leading-tight truncate">
                   {t.name.split(".").slice(-2).join(".")}
                 </span>
-                <span className={`flex items-center gap-1 text-[8px] font-bold shrink-0 px-1.5 py-0.5 rounded-full ${st.bg} ${st.border} ${st.text}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                <span className={`flex items-center gap-1 text-[9px] font-bold shrink-0 px-1.5 py-0.5 rounded-full border ${st.bg} ${st.border} ${st.text}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${st.dot}`} />
                   {t.status}
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-[9px] text-slate-400">
-                <span>{t.partitions}p</span>
-                <span>·</span>
-                <span>lag {t.lagTotal > 999 ? `${(t.lagTotal/1000).toFixed(1)}k` : t.lagTotal}</span>
-                <span>·</span>
-                <span>{t.msgPerSec}/s</span>
+              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                <span className="font-medium">{t.partitions}p</span>
+                <span className="text-slate-300">·</span>
+                <span>
+                  lag <span className={clsx("font-semibold", t.lagTotal > 5000 ? "text-red-600" : t.lagTotal > 1000 ? "text-amber-600" : "text-slate-600")}>
+                    {t.lagTotal > 999 ? `${(t.lagTotal / 1000).toFixed(1)}k` : t.lagTotal}
+                  </span>
+                  {lagTrend && <span className={clsx("ml-0.5 text-[9px] font-bold", trendColor)}>{lagTrend}</span>}
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="font-medium">{t.msgPerSec}/s</span>
               </div>
             </button>
           );
@@ -1060,10 +1081,35 @@ export default function Dashboard() {
   const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction } = useMeshStream();
   const phase = state.mralPhase ?? "idle";
 
-  // ── Topics state ─────────────────────────────────────────────────────────
+  // ── Topics state + live metrics animation ────────────────────────────────
   const [topics, setTopics] = useState<KafkaTopic[]>(INITIAL_TOPICS);
   const [selectedTopic, setSelectedTopic] = useState<KafkaTopic | null>(null);
   const [pendingDelete, setPendingDelete] = useState<KafkaTopic | null>(null);
+  // Track prev lag per topic for ▲▼ trend indicator
+  const prevLagRef = useRef<Record<string, number>>({});
+
+  // Live metric fluctuation — runs independently of scenarios
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTopics((prev) =>
+        prev.map((t) => {
+          // msg/s drifts ±12%
+          const msgDelta = (Math.random() - 0.48) * 0.12 * t.msgPerSec;
+          const newMsg = Math.max(1, Math.round(t.msgPerSec + msgDelta));
+          // lag: critical topics tend to grow, healthy ones drain
+          const lagBias = t.status === "critical" ? 0.12 : t.status === "degraded" ? 0.04 : -0.08;
+          const lagDelta = (Math.random() - 0.5 + lagBias) * Math.max(200, t.lagTotal * 0.18);
+          const newLag = Math.max(0, Math.round(t.lagTotal + lagDelta));
+          const newStatus: KafkaTopic["status"] =
+            newLag > 14000 ? "critical" : newLag > 2800 ? "degraded" : "healthy";
+          return { ...t, lagTotal: newLag, msgPerSec: newMsg, status: newStatus };
+        })
+      );
+    }, 2200);
+    return () => clearInterval(id);
+  }, []);
+
+  const [extraOpen, setExtraOpen] = useState(false);
 
   const handleTopicSave = (updated: KafkaTopic) => {
     const prev = topics.find((t) => t.id === updated.id)!;
@@ -1149,15 +1195,15 @@ export default function Dashboard() {
       <div className="flex flex-1 gap-0 overflow-hidden">
 
         {/* Left sidebar */}
-        <aside className="w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col gap-5 p-4 overflow-y-auto shadow-sm">
+        <aside className="w-72 shrink-0 bg-white border-r border-slate-200 flex flex-col gap-5 p-4 overflow-y-auto shadow-sm">
 
-          {/* Scenarios */}
+          {/* Pinned Scenarios */}
           <div>
-            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
-              Scenarios
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-3">
+              Common Scenarios
             </div>
             <div className="space-y-2">
-              {SCENARIOS.map((s) => (
+              {PINNED_SCENARIOS.map((s) => (
                 <button
                   key={s.id}
                   disabled={state.scenarioRunning}
@@ -1171,7 +1217,7 @@ export default function Dashboard() {
                     <span className="text-xs font-semibold text-slate-700 group-hover:text-blue-800 leading-tight">
                       {s.label}
                     </span>
-                    <span className="text-[9px] font-bold shrink-0 px-1.5 py-0.5 rounded-md"
+                    <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md"
                       style={{ background: s.color + "15", color: s.color, border: `1px solid ${s.color}30` }}>
                       {s.badge}
                     </span>
@@ -1179,6 +1225,42 @@ export default function Dashboard() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Collapsible extra scenarios */}
+          <div>
+            <button
+              onClick={() => setExtraOpen((o) => !o)}
+              className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-3 hover:text-slate-700 transition-colors"
+            >
+              <span>More Scenarios <span className="text-slate-300 font-normal normal-case">({EXTRA_SCENARIOS.length})</span></span>
+              <span className={clsx("text-slate-400 transition-transform", extraOpen && "rotate-180")}>▾</span>
+            </button>
+            {extraOpen && (
+              <div className="space-y-2">
+                {EXTRA_SCENARIOS.map((s) => (
+                  <button
+                    key={s.id}
+                    disabled={state.scenarioRunning}
+                    onClick={() => trigger(s.id)}
+                    className="w-full text-left rounded-xl p-3 border transition-all
+                               disabled:opacity-40 disabled:cursor-not-allowed
+                               bg-white border-slate-200 hover:border-blue-400 hover:bg-blue-50
+                               shadow-sm group"
+                  >
+                    <div className="flex items-start justify-between gap-1.5">
+                      <span className="text-xs font-semibold text-slate-700 group-hover:text-blue-800 leading-tight">
+                        {s.label}
+                      </span>
+                      <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md"
+                        style={{ background: s.color + "15", color: s.color, border: `1px solid ${s.color}30` }}>
+                        {s.badge}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Broker panel */}
@@ -1223,7 +1305,7 @@ export default function Dashboard() {
           )}
 
           {/* Kafka Topics panel */}
-          <TopicsPanel topics={topics} onSelect={setSelectedTopic} />
+          <TopicsPanel topics={topics} prevLagRef={prevLagRef} onSelect={setSelectedTopic} />
         </aside>
 
         {/* Canvas */}
@@ -1265,9 +1347,9 @@ export default function Dashboard() {
                                transition-all cursor-pointer group"
                   >
                     <span>{n.channel === "slack" ? "💬" : n.channel === "itsm" ? "🎫" : "✉️"}</span>
-                    <span className="text-green-800 group-hover:text-blue-800 font-medium max-w-[260px] truncate">{n.message}</span>
+                    <span className="text-green-800 group-hover:text-blue-800 font-medium max-w-[300px] truncate text-xs">{n.message}</span>
                     {state.lastEmailSummary && (
-                      <span className="text-[9px] text-slate-400 group-hover:text-blue-500 shrink-0">📋</span>
+                      <span className="text-xs text-slate-400 group-hover:text-blue-500 shrink-0">📋</span>
                     )}
                   </button>
                 ))}
@@ -1277,7 +1359,7 @@ export default function Dashboard() {
         </main>
 
         {/* Right sidebar — audit log with live feed overlaid while running */}
-        <aside className="w-72 shrink-0 bg-white border-l border-slate-200 flex flex-col p-4 overflow-hidden shadow-sm">
+        <aside className="w-80 shrink-0 bg-white border-l border-slate-200 flex flex-col p-4 overflow-hidden shadow-sm">
           {/* Wrapper is the positioning context — live feed uses absolute inset-0 inside here */}
           <div className="flex-1 overflow-hidden relative">
             <AuditLogPanel log={state.auditLog} />
@@ -1291,15 +1373,15 @@ export default function Dashboard() {
           {/* Lessons learned — light cyan */}
           {state.lessons.length > 0 && (
             <div className="shrink-0 mt-4 border-t border-slate-200 pt-3">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
                 Lessons Learned ({state.lessons.length})
               </div>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto">
+              <div className="space-y-2 max-h-40 overflow-y-auto">
                 {[...state.lessons].reverse().slice(0, 5).map((l) => (
                   <div key={l.id}
-                    className="text-[10px] bg-cyan-50 rounded-lg px-2.5 py-2 border border-cyan-100">
-                    <div className="text-cyan-700 font-semibold truncate">[{l.scenarioId}] {l.actionTaken}</div>
-                    <div className="text-slate-500 truncate mt-0.5">{l.notes.slice(0, 60)}…</div>
+                    className="bg-cyan-50 rounded-lg px-3 py-2.5 border border-cyan-100">
+                    <div className="text-xs text-cyan-700 font-semibold truncate">[{l.scenarioId}] {l.actionTaken}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{l.notes.slice(0, 80)}…</div>
                   </div>
                 ))}
               </div>
