@@ -219,18 +219,25 @@ interface BrokerNodeData extends Record<string, unknown> {
   sasl?: boolean;
 }
 
+const BROKER_DIAMETER = 172;
+
 function BrokerNode({ data: rawData }: NodeProps<Node<BrokerNodeData>>) {
   const d = rawData as BrokerNodeData;
   const secure = d.mtls !== false && d.sasl !== false;
 
   return (
     <div style={{
-      width: 186,
-      background: "#ffffff",
-      border: "2px solid #3b82f6",
-      borderRadius: 14,
-      padding: "14px 14px 14px",
-      boxShadow: "0 4px 18px rgba(59,130,246,0.16)",
+      width:         BROKER_DIAMETER,
+      height:        BROKER_DIAMETER,
+      borderRadius:  "50%",
+      background:    "#eff6ff",          // soft blue tint
+      border:        "3px solid #3b82f6",
+      boxShadow:     "0 4px 20px rgba(59,130,246,0.18)",
+      display:       "flex",
+      flexDirection: "column",
+      alignItems:    "center",
+      justifyContent:"center",
+      gap:           3,
     }}>
       <Handle type="source" position={Position.Top}    id="st" style={H} />
       <Handle type="target" position={Position.Top}    id="tt" style={{ ...H, left: "60%" }} />
@@ -241,20 +248,31 @@ function BrokerNode({ data: rawData }: NodeProps<Node<BrokerNodeData>>) {
       <Handle type="source" position={Position.Left}   id="sl" style={H} />
       <Handle type="target" position={Position.Left}   id="tl" style={{ ...H, top: "62%" }} />
 
+      {/* Name */}
       <div style={{
         fontSize: 14, fontWeight: 800, letterSpacing: "0.7px",
-        color: "#3b82f6", textTransform: "uppercase", marginBottom: 6,
+        color: "#3b82f6", textTransform: "uppercase",
       }}>
         BROKER
       </div>
-      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 5 }}>
+
+      {/* Mode + online count */}
+      <div style={{ fontSize: 10, color: "#64748b", textAlign: "center" }}>
         {d.mode} · {d.brokersOnline} online
       </div>
-      <div style={{ fontSize: 11, color: secure ? "#1D9E75" : "#f97316", fontWeight: 700 }}>
-        mTLS + SASL {secure ? "✓" : "✗"}
+
+      {/* Security status */}
+      <div style={{
+        fontSize: 10, fontWeight: 700,
+        color: secure ? "#1D9E75" : "#f97316",
+        textAlign: "center",
+      }}>
+        mTLS+SASL {secure ? "✓" : "✗"}
       </div>
-      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 5 }}>
-        {d.topicCount} topics · epoch {d.controllerEpoch}
+
+      {/* Topics + epoch */}
+      <div style={{ fontSize: 10, color: "#94a3b8", textAlign: "center" }}>
+        {d.topicCount} topics
       </div>
     </div>
   );
