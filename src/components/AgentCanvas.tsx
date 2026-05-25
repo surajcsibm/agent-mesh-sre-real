@@ -269,11 +269,11 @@ const nodeTypes = { agent: AgentNode, broker: BrokerNode };
 //   [MONITOR]             [NOTIFY]
 //
 const NODE_POS: Record<string, { x: number; y: number }> = {
-  intake:       { x: 10,  y: 10  },
-  writer:       { x: 570, y: 10  },
-  broker:       { x: 278, y: 200 },
-  monitor:      { x: 10,  y: 410 },
-  notification: { x: 570, y: 410 },
+  intake:       { x: 30,  y: 20  },
+  writer:       { x: 390, y: 20  },
+  broker:       { x: 206, y: 180 },
+  monitor:      { x: 30,  y: 340 },
+  notification: { x: 390, y: 340 },
 };
 
 // ── Edge colours (inactive state, per wireframe accent colours) ───────────────
@@ -363,10 +363,9 @@ export default function AgentCanvas({ agents, broker, activeParticles, onKill, o
         label: e.label,
         animated: active,
         style: {
-          stroke:           active ? "#16a34a" : baseColor,
-          strokeWidth:      active ? 7 : 4,
-          strokeDasharray:  active ? undefined : "10 6",
-          opacity:          active ? 1 : 0.65,
+          stroke:      active ? "#16a34a" : baseColor,
+          strokeWidth: active ? 7 : 4,
+          opacity:     active ? 1 : 0.70,
         },
         labelStyle:         { fontSize: 10, fill: "#64748b", fontWeight: 600 },
         labelBgStyle:       { fill: "rgba(255,255,255,0.85)", fillOpacity: 0.85 },
