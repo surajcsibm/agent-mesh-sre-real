@@ -997,12 +997,13 @@ function TopicsPanel({
     <div className="flex flex-col min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[11px] font-bold uppercase tracking-widest"
-             style={{ color: "#1e3a5f", opacity: 0.6 }}>
-          Kafka Topics
-          <span className="ml-1.5 font-normal normal-case" style={{ color: "#94a3b8" }}>
-            ({topics.length} total · {visible.length} shown)
-          </span>
+        <div>
+          <div className="text-xs font-extrabold uppercase tracking-widest" style={{ color: "#1e3a5f" }}>
+            Kafka Topics
+          </div>
+          <div className="text-[11px] font-semibold mt-0.5" style={{ color: "#475569" }}>
+            {topics.length} total &nbsp;·&nbsp; {visible.length} shown
+          </div>
         </div>
         <button onClick={onCreateNew}
           className="text-[10px] font-bold rounded-lg px-2 py-1 transition-colors"
@@ -1516,13 +1517,13 @@ function ScenarioHistoryBar({ history, onView }: {
 
   return (
     <div className="p-3">
-      <div className="flex items-center gap-2 mb-2 px-1">
-        <span className="w-2 h-2 rounded-full" style={{ background: "#1D9E75" }} />
-        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: "#1e3a5f", opacity: 0.65 }}>
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: "#1D9E75" }} />
+        <span className="text-xs font-extrabold uppercase tracking-widest" style={{ color: "#1e3a5f" }}>
           Scenario History
         </span>
-        <span className="text-xs font-normal ml-1" style={{ color: "#94a3b8" }}>
-          ({history.length}) — click to view full details
+        <span className="text-[11px] font-semibold ml-1" style={{ color: "#475569" }}>
+          {history.length} runs — click any to view
         </span>
       </div>
 
@@ -1536,7 +1537,7 @@ function ScenarioHistoryBar({ history, onView }: {
             <button
               key={i}
               onClick={() => onView(h)}
-              className="w-full text-left rounded-xl border flex items-center gap-3 px-4 py-2.5 transition-all"
+              className="w-full text-left rounded-xl border flex items-center gap-3 px-4 py-3 transition-all"
               style={{
                 background: "#fff", borderColor: "#dce5ef",
                 borderLeftWidth: 4, borderLeftColor: cardColor,
@@ -1554,25 +1555,25 @@ function ScenarioHistoryBar({ history, onView }: {
             >
               {/* Status dot */}
               <span style={{
-                width: 8, height: 8, borderRadius: "50%", flexShrink: 0, display: "inline-block",
+                width: 9, height: 9, borderRadius: "50%", flexShrink: 0, display: "inline-block",
                 background: approved ? "#16a34a" : "#dc2626",
               }} />
 
               {/* Scenario name */}
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#1e3a5f", flex: 1, textAlign: "left" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#1e3a5f", flex: 1, textAlign: "left" }}>
                 {h.scenarioLabel}
               </span>
 
               {/* Confidence */}
               {confidence !== null && (
-                <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", flexShrink: 0 }}>
                   {confidence}%
                 </span>
               )}
 
               {/* Status badge */}
               <span style={{
-                fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 20, flexShrink: 0,
+                fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, flexShrink: 0,
                 background: approved ? "#dcfce7" : "#fef2f2",
                 color: approved ? "#16a34a" : "#dc2626",
                 border: `1px solid ${approved ? "#86efac" : "#fca5a5"}`,
@@ -1581,7 +1582,7 @@ function ScenarioHistoryBar({ history, onView }: {
               </span>
 
               {/* Chevron */}
-              <span style={{ fontSize: 14, color: "#94a3b8", flexShrink: 0 }}>›</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#64748b", flexShrink: 0 }}>›</span>
             </button>
           );
         })}
@@ -1888,8 +1889,8 @@ export default function Dashboard() {
 
           {/* Pinned Scenarios */}
           <div>
-            <div className="text-xs font-bold uppercase tracking-widest mb-3"
-                 style={{ color: "#1e3a5f", opacity: 0.65 }}>
+            <div className="text-xs font-extrabold uppercase tracking-widest mb-3"
+                 style={{ color: "#1e3a5f" }}>
               Common Scenarios
             </div>
             <div className="space-y-2">
@@ -1904,7 +1905,7 @@ export default function Dashboard() {
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "#fff"; (e.currentTarget as HTMLElement).style.boxShadow = ""; }}
                 >
                   <div className="flex items-start justify-between gap-1.5">
-                    <span className="text-xs font-semibold leading-snug" style={{ color: "#1e3a5f" }}>
+                    <span className="text-[13px] font-bold leading-snug" style={{ color: "#1e3a5f" }}>
                       {s.label}
                     </span>
                     <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md"
@@ -1921,11 +1922,11 @@ export default function Dashboard() {
           <div>
             <button
               onClick={() => setExtraOpen((o) => !o)}
-              className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-widest mb-3 transition-colors"
-              style={{ color: "#1e3a5f", opacity: 0.55 }}
+              className="w-full flex items-center justify-between text-xs font-extrabold uppercase tracking-widest mb-3 transition-colors"
+              style={{ color: "#1e3a5f" }}
             >
-              <span>More Scenarios <span className="font-normal normal-case" style={{ color: "#94a3b8" }}>({EXTRA_SCENARIOS.length})</span></span>
-              <span className={clsx("transition-transform", extraOpen && "rotate-180")} style={{ color: "#94a3b8" }}>▾</span>
+              <span>More Scenarios <span className="font-semibold normal-case text-[11px]" style={{ color: "#64748b" }}>({EXTRA_SCENARIOS.length})</span></span>
+              <span className={clsx("transition-transform text-sm", extraOpen && "rotate-180")} style={{ color: "#64748b" }}>▾</span>
             </button>
             {extraOpen && (
               <div className="space-y-2">
@@ -1940,7 +1941,7 @@ export default function Dashboard() {
                     onMouseLeave={e => { (e.currentTarget.style.borderColor = "#dce5ef"); (e.currentTarget.style.background = "#fff"); }}
                   >
                     <div className="flex items-start justify-between gap-1.5">
-                      <span className="text-xs font-semibold leading-tight" style={{ color: "#1e3a5f" }}>
+                      <span className="text-[13px] font-bold leading-tight" style={{ color: "#1e3a5f" }}>
                         {s.label}
                       </span>
                       <span className="text-[10px] font-bold shrink-0 px-1.5 py-0.5 rounded-md"
