@@ -285,13 +285,69 @@ function BrokerNode({ data: rawData }: NodeProps<Node<BrokerNodeData>>) {
   );
 }
 
-const nodeTypes = { agent: AgentNode, broker: BrokerNode };
+// ── SubAgentNode — ephemeral small circles spawned by Monitor ────────────────
+// Appears below Monitor during Reason / Act / Learn phases.
+
+const SUB_DIAMETER = 90;
+
+interface SubAgentNodeData extends Record<string, unknown> {
+  label:    string;   // "REASON" | "ACT" | "LEARN"
+  accent:   string;
+  bgColor:  string;
+  sublabel: string;   // short description line
+}
+
+function SubAgentNode({ data: rawData }: NodeProps<Node<SubAgentNodeData>>) {
+  const d = rawData as SubAgentNodeData;
+  return (
+    <div style={{
+      width:         SUB_DIAMETER,
+      height:        SUB_DIAMETER,
+      borderRadius:  "50%",
+      background:    d.bgColor,
+      border:        `2px dashed ${d.accent}`,
+      display:       "flex",
+      flexDirection: "column",
+      alignItems:    "center",
+      justifyContent:"center",
+      position:      "relative",
+      boxShadow:     `0 0 0 5px ${d.accent}18, 0 4px 16px ${d.accent}28`,
+      animation:     "pulse 1.6s infinite",
+      transition:    "all 0.3s ease",
+    }}>
+      <Handle type="target" position={Position.Top}   id="tt" style={H} />
+      <Handle type="target" position={Position.Left}  id="tl" style={H} />
+      <Handle type="target" position={Position.Right} id="tr" style={H} />
+
+      {/* Phase label */}
+      <div style={{
+        fontSize: 11, fontWeight: 900, color: d.accent,
+        textTransform: "uppercase", letterSpacing: "0.5px",
+        lineHeight: 1.2,
+      }}>
+        {d.label}
+      </div>
+
+      {/* Sub-label */}
+      <div style={{
+        fontSize: 8, color: "#64748b", marginTop: 4,
+        textAlign: "center", lineHeight: 1.3,
+        padding: "0 8px",
+      }}>
+        {d.sublabel}
+      </div>
+    </div>
+  );
+}
+
+const nodeTypes = { agent: AgentNode, broker: BrokerNode, subagent: SubAgentNode };
 
 // ── Node positions — 2×2 agents + Broker in centre (per wireframe) ────────────
 //
 //   [INTAKE]              [WRITER]
 //            [BROKER]
 //   [MONITOR]             [NOTIFY]
+//        [SUB-AGENT]          ← ephemeral, below Monitor
 //
 const NODE_POS: Record<string, { x: number; y: number }> = {
   intake:       { x: 30,  y: 20  },
@@ -300,6 +356,9 @@ const NODE_POS: Record<string, { x: number; y: number }> = {
   monitor:      { x: 30,  y: 340 },
   notification: { x: 390, y: 340 },
 };
+
+// Position of ephemeral sub-agent bubble (below Monitor, centred)
+const SUB_AGENT_POS = { x: 41, y: 545 }; // Monitor bottom edge ~512 → 33 px gap
 
 // ── Edge colours (inactive state, per wireframe accent colours) ───────────────
 const EDGE_COLOR: Record<string, string> = {
@@ -371,11 +430,58 @@ export default function AgentCanvas({ agents, broker, activeParticles, onKill, o
       });
     }
 
+    // ── Ephemeral sub-agent bubbles spawned by Monitor ──────────────────────
+    // One small circle appears below Monitor during each active MRAL phase.
+    const mon = agentMap["monitor"];
+    if (mon) {
+      const isLearning = mon.status === "reasoning" && mon.mralPhase === "learn";
+      const isReasoning = mon.status === "reasoning" && mon.mralPhase !== "learn";
+      const isActing    = mon.status === "acting";
+      const isAwaiting  = mon.status === "awaiting-approval";
+
+      if (isReasoning || isAwaiting) {
+        list.push({
+          id: "sub-reason", type: "subagent",
+          position: SUB_AGENT_POS,
+          data: {
+            label:   "REASON",
+            accent:  "#7c3aed",
+            bgColor: "#f5f3ff",
+            sublabel: isAwaiting
+              ? "Awaiting approval…"
+              : (mon.lastReasoning?.rootCause?.slice(0, 36) ?? "Analyzing metrics…"),
+          } as SubAgentNodeData,
+        });
+      } else if (isActing) {
+        list.push({
+          id: "sub-act", type: "subagent",
+          position: SUB_AGENT_POS,
+          data: {
+            label:   "ACT",
+            accent:  "#ea580c",
+            bgColor: "#fff7ed",
+            sublabel: mon.lastAction?.detail?.slice(0, 36) ?? "Executing action…",
+          } as SubAgentNodeData,
+        });
+      } else if (isLearning) {
+        list.push({
+          id: "sub-learn", type: "subagent",
+          position: SUB_AGENT_POS,
+          data: {
+            label:   "LEARN",
+            accent:  "#16a34a",
+            bgColor: "#f0fdf4",
+            sublabel: mon.lastLesson?.notes?.slice(0, 36) ?? "Recording lesson…",
+          } as SubAgentNodeData,
+        });
+      }
+    }
+
     return list;
   }, [agentMap, broker, onKill, onRestart]);
 
-  const edges: Edge[] = useMemo(() =>
-    EDGE_DEFS.map(e => {
+  const edges: Edge[] = useMemo(() => {
+    const list: Edge[] = EDGE_DEFS.map(e => {
       const active    = activeEdgeIds.has(e.id);
       const baseColor = EDGE_COLOR[e.id] ?? "#94a3b8";
       return {
@@ -397,8 +503,60 @@ export default function AgentCanvas({ agents, broker, activeParticles, onKill, o
         labelBgPadding:     [4, 2] as [number, number],
         labelBgBorderRadius: 3,
       };
-    }),
-  [activeEdgeIds]);
+    });
+
+    // ── Ephemeral edges from Monitor to active sub-agent bubble ────────────
+    const mon = agentMap["monitor"];
+    if (mon) {
+      const isLearning  = mon.status === "reasoning" && mon.mralPhase === "learn";
+      const isReasoning = mon.status === "reasoning" && mon.mralPhase !== "learn";
+      const isActing    = mon.status === "acting";
+      const isAwaiting  = mon.status === "awaiting-approval";
+
+      if (isReasoning || isAwaiting) {
+        list.push({
+          id: "e-sub-reason",
+          source: "monitor", target: "sub-reason",
+          sourceHandle: "sb", targetHandle: "tt",
+          type: "bezier", animated: true,
+          label: "spawn",
+          style: { stroke: "#7c3aed", strokeWidth: 2, strokeDasharray: "6 3", opacity: 0.9 },
+          labelStyle:         { fontSize: 9, fill: "#7c3aed", fontWeight: 700 },
+          labelBgStyle:       { fill: "rgba(255,255,255,0.85)", fillOpacity: 0.85 },
+          labelBgPadding:     [3, 1] as [number, number],
+          labelBgBorderRadius: 3,
+        });
+      } else if (isActing) {
+        list.push({
+          id: "e-sub-act",
+          source: "monitor", target: "sub-act",
+          sourceHandle: "sb", targetHandle: "tt",
+          type: "bezier", animated: true,
+          label: "spawn",
+          style: { stroke: "#ea580c", strokeWidth: 2, strokeDasharray: "6 3", opacity: 0.9 },
+          labelStyle:         { fontSize: 9, fill: "#ea580c", fontWeight: 700 },
+          labelBgStyle:       { fill: "rgba(255,255,255,0.85)", fillOpacity: 0.85 },
+          labelBgPadding:     [3, 1] as [number, number],
+          labelBgBorderRadius: 3,
+        });
+      } else if (isLearning) {
+        list.push({
+          id: "e-sub-learn",
+          source: "monitor", target: "sub-learn",
+          sourceHandle: "sb", targetHandle: "tt",
+          type: "bezier", animated: true,
+          label: "spawn",
+          style: { stroke: "#16a34a", strokeWidth: 2, strokeDasharray: "6 3", opacity: 0.9 },
+          labelStyle:         { fontSize: 9, fill: "#16a34a", fontWeight: 700 },
+          labelBgStyle:       { fill: "rgba(255,255,255,0.85)", fillOpacity: 0.85 },
+          labelBgPadding:     [3, 1] as [number, number],
+          labelBgBorderRadius: 3,
+        });
+      }
+    }
+
+    return list;
+  }, [activeEdgeIds, agentMap]);
 
   return (
     <div style={{ width: "100%", height: "100%" }}>

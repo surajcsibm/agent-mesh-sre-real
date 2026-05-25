@@ -1564,27 +1564,31 @@ export default function Dashboard() {
   // ── Floating overlay states ────────────────────────────────────────────────
   const [brokerOpen, setBrokerOpen]           = useState(false);
 
-  // Persistent scenario history — survives page refreshes via localStorage
-  const [summaryHistory, setSummaryHistory]   = useState<EmailSummaryData[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = localStorage.getItem("sre-scenario-history");
-      return saved ? (JSON.parse(saved) as EmailSummaryData[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  // Persistent scenario history — survives page refreshes via localStorage.
+  // Always start with [] so SSR and client hydration match, then load after mount.
+  const [summaryHistory, setSummaryHistory]   = useState<EmailSummaryData[]>([]);
+  const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
 
   // Canvas height — +/- resizable
   const [canvasHeight, setCanvasHeight] = useState(580);
 
-  // Persist history to localStorage whenever it changes
+  // Load saved history from localStorage once after first client render
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sre-scenario-history");
+      if (saved) setSummaryHistory(JSON.parse(saved) as EmailSummaryData[]);
+    } catch { /* corrupt data — ignore */ }
+    setHistoryMounted(true);
+  }, []); // runs once on mount
+
+  // Persist history to localStorage whenever it changes (after mount)
+  useEffect(() => {
+    if (!historyMounted) return; // skip the initial empty render
     try {
       localStorage.setItem("sre-scenario-history", JSON.stringify(summaryHistory));
     } catch { /* quota exceeded — ignore */ }
-  }, [summaryHistory]);
+  }, [summaryHistory, historyMounted]);
 
   // Capture completed scenario to history ───────────────────────────────────
   // Also hydrate liveEvents from the current auditLog if the scenario didn't
