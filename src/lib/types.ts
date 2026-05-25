@@ -1,5 +1,26 @@
 // ── Core domain types for the Agent Mesh SRE runtime ─────────────────────────
 
+/** Static definition of an agent (used by canvas/AgentNode.tsx). */
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  role: string;
+  subtitle: string;
+  accent: "cyan" | "violet" | "emerald" | "amber" | "rose";
+  tools: string[];
+  consumes: string[];
+  produces: string[];
+}
+
+/** Runtime state of an agent (used by canvas/AgentNode.tsx). */
+export interface AgentRuntimeState {
+  status:
+    | "online" | "starting" | "reasoning" | "acting" | "learning"
+    | "awaiting-approval" | "crashed" | "replaying" | "offline";
+  consumerLag: Record<string, number>;
+  processed: number;
+}
+
 export type AgentId = "intake" | "monitor" | "writer" | "notification";
 
 export type MralPhase = "idle" | "monitor" | "reason" | "awaiting" | "act" | "learn" | "replaying";
