@@ -4,6 +4,7 @@
 import { eventBus } from "./event-bus";
 import { sendAgentSummary } from "./emailer";
 import { kafkaProduceAudit, kafkaProduceLesson, kafkaProduce, TOPICS } from "./kafka";
+import { getRuntime } from "./runtime-mode";
 import type {
   AgentState,
   BrokerState,
@@ -59,6 +60,35 @@ function makeInitialAgents(): Record<AgentId, AgentState> {
 }
 
 function makeInitialBroker(): BrokerState {
+  const rt = getRuntime();
+  const isReal = rt.mode === "real";
+
+  if (isReal) {
+    // Real Kafka cluster (Aiven / RedPanda / Confluent) — single-node defaults.
+    // Aiven Startup-2 has 1 broker; mTLS client certs are not used (SASL only).
+    return {
+      mode: "REAL",
+      controllerEpoch: 1,
+      brokersOnline: 1,
+      mtls: false,      // Aiven uses SASL/SCRAM, not mTLS client certs
+      sasl: true,
+      aclCount: 0,
+      topics: {
+        "ops.requests.v1":      { partitions: 1, lag: 0, offsetHigh: 0 },
+        "ops.kafka.metrics.v1": { partitions: 1, lag: 0, offsetHigh: 0 },
+        "ops.incidents.v1":     { partitions: 1, lag: 0, offsetHigh: 0 },
+        "ops.actions.audit.v1": { partitions: 1, lag: 0, offsetHigh: 0 },
+        "ops.lessons.v1":       { partitions: 1, lag: 0, offsetHigh: 0 },
+        "ops.notifications.v1": { partitions: 1, lag: 0, offsetHigh: 0 },
+        "demo.payments.events": { partitions: 1, lag: 0, offsetHigh: 0 },
+      },
+      consumerGroups: {
+        "payments-consumer": { lag: 0, rebalanceState: "stable", members: 1 },
+        "share-group-1":     { lag: 0, rebalanceState: "stable", members: 1 },
+      },
+    };
+  }
+
   return {
     mode: "MOCK", controllerEpoch: 42, brokersOnline: 3, mtls: true, sasl: true, aclCount: 24,
     topics: {

@@ -1,0 +1,94 @@
+# GKE variant of 02-kafka-cluster.yaml.
+#
+# Key differences from deploy/base/02-kafka-cluster.yaml (OpenShift):
+#   - external listener: type=loadbalancer  (was type=route — OpenShift only)
+#   - replication factors: 1               (was 3 — single broker on GKE demo)
+#   - superUsers/CruiseControl removed     (optional; add back for production)
+#
+# Strimzi 0.51.0 — Kafka 4.2.0 (KRaft, KIP-848, KIP-932)
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: agent-mesh-kafka
+  namespace: agent-mesh-sre
+  labels:
+    app.kubernetes.io/part-of: agent-mesh-sre
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 4.2.0
+    metadataVersion: 4.2-IV1
+    listeners:
+      # Internal plaintext — used by demo workloads inside the cluster.
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+
+      # Internal TLS + SCRAM — used by agent pods inside the cluster.
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+        authentication:
+          type: scram-sha-512
+
+      # External LoadBalancer — used by localhost:3000 and Vercel.
+      # GKE provisions a Cloud Load Balancer; IP appears in
+      # .status.listeners[name==external].bootstrapServers once ready.
+      - name: external
+        port: 9094
+        type: loadbalancer
+        tls: true
+        authentication:
+          type: scram-sha-512
+
+    authorization:
+      type: simple
+      # denyIfNoMatchingAcl defaults to false — fine for demo iteration.
+
+    config:
+      # Single-broker settings (rf=1 everywhere).
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      auto.create.topics.enable: false
+      # KIP-848 cooperative consumer rebalancing.
+      group.coordinator.rebalance.protocols: "classic,consumer"
+      # KIP-932 share groups (Kafka 4.x).
+      group.share.enable: "true"
+      group.initial.rebalance.delay.ms: 500
+      log.retention.hours: 24
+
+    resources:
+      requests:
+        memory: 1Gi
+        cpu: "500m"
+      limits:
+        memory: 2Gi
+        cpu: "1"
+
+  entityOperator:
+    topicOperator:
+      reconciliationIntervalSeconds: 30
+      resources:
+        requests:
+          memory: 256Mi
+          cpu: "100m"
+        limits:
+          memory: 512Mi
+          cpu: "500m"
+    userOperator:
+      reconciliationIntervalSeconds: 30
+      resources:
+        requests:
+          memory: 256Mi
+          cpu: "100m"
+        limits:
+          memory: 512Mi
+          cpu: "500m"

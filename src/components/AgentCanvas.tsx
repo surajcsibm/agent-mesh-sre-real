@@ -230,7 +230,7 @@ const BROKER_DIAMETER = 172;
 
 function BrokerNode({ data: rawData }: NodeProps<Node<BrokerNodeData>>) {
   const d = rawData as BrokerNodeData;
-  const secure = d.mtls !== false && d.sasl !== false;
+  const secure = d.mtls !== false || d.sasl !== false;  // secure if either mTLS or SASL enabled
 
   return (
     <div style={{

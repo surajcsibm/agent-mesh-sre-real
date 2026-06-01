@@ -48,7 +48,7 @@ export class KafkaBackend {
   private subscribed: string[] = [];
   private status: KafkaBackendStatus = { connected: false, topics: [] };
 
-  constructor(opts: { brokers: string[]; ssl?: boolean; ca?: string; sasl?: { mechanism: "scram-sha-512"; username: string; password: string }; clientId?: string }) {
+  constructor(opts: { brokers: string[]; ssl?: boolean; ca?: string; sasl?: { mechanism: "scram-sha-512" | "scram-sha-256" | "plain"; username: string; password: string }; clientId?: string }) {
     this.kafka = new Kafka({
       clientId: opts.clientId ?? "agent-mesh-sre",
       brokers: opts.brokers,
@@ -73,7 +73,11 @@ export class KafkaBackend {
       brokers: bootstrap.split(",").map((s) => s.trim()),
       ssl: true,
       ca: r.kafka.caCertPem,
-      sasl: { mechanism: "scram-sha-512", username: r.kafka.username, password: r.kafka.password },
+      sasl: {
+        mechanism: r.kafka.saslMechanism ?? "scram-sha-512",
+        username: r.kafka.username,
+        password: r.kafka.password,
+      },
     });
   }
 

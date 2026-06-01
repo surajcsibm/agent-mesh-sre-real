@@ -5,7 +5,7 @@ import type {
   AgentState, BrokerState, MralPhase, ApprovalRequest,
   AuditRecord, LessonRecord, NotificationRecord, BusEvent,
 } from "@/lib/types";
-import { runClientScenario, resolvePendingApproval, runTopicManagement, runTopicHeal, type ScenarioKey, type SimAction, type EmailSummaryData, type TopicChangePayload, type TopicHealPayload } from "@/lib/client-sim";
+import { runClientScenario, resolvePendingApproval, runTopicManagement, runTopicHeal, setBrokerMode, type ScenarioKey, type SimAction, type EmailSummaryData, type TopicChangePayload, type TopicHealPayload } from "@/lib/client-sim";
 
 export interface MeshClientState {
   agents: AgentState[];
@@ -109,7 +109,11 @@ export function useMeshStream() {
       es.onmessage = (e) => {
         const event = JSON.parse(e.data) as BusEvent & { auditLog?: AuditRecord[]; lessons?: LessonRecord[]; notifications?: NotificationRecord[]; scenarioRunning?: boolean };
         switch (event.type) {
-          case "state":
+          case "state": {
+            // Sync broker mode into client-sim so MRAL scenario steps preserve REAL state.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const brokerMode = (event as any).broker?.mode;
+            if (brokerMode === "REAL" || brokerMode === "MOCK") setBrokerMode(brokerMode);
             // Strip pendingApprovals from SSE payloads — approvals are managed
             // exclusively by client-sim. On localhost the Next.js dev server
             // retains scenario state across page refreshes in globalThis, so the
@@ -117,6 +121,7 @@ export function useMeshStream() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             dispatch({ type: "state", payload: { ...(event as any), pendingApprovals: [] } });
             break;
+          }
           case "audit":
             dispatch({ type: "audit", record: event.record });
             break;

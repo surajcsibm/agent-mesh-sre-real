@@ -27,6 +27,13 @@ export type RuntimeConfig = {
     password?: string;
     /** PEM encoded CA cert for the cluster TLS listener. Server-only. */
     caCertPem?: string;
+    /**
+     * SASL mechanism to use when connecting.
+     *   "scram-sha-512" — Strimzi on GKE/OpenShift (default)
+     *   "scram-sha-256" — RedPanda Cloud Serverless
+     *   "plain"         — Confluent Cloud
+     */
+    saslMechanism?: "scram-sha-512" | "scram-sha-256" | "plain";
   };
 };
 
@@ -51,6 +58,7 @@ export function getRuntime(): RuntimeConfig {
               caCertPem: process.env.KAFKA_CA_CERT_BASE64
                 ? Buffer.from(process.env.KAFKA_CA_CERT_BASE64, "base64").toString("utf8")
                 : undefined,
+              saslMechanism: (process.env.KAFKA_SASL_MECHANISM ?? "scram-sha-512") as "scram-sha-512" | "scram-sha-256" | "plain",
             }
           : undefined,
     };

@@ -7,6 +7,8 @@ import type { EmailSummaryData, TopicChangePayload, TopicHealPayload } from "./u
 import clsx from "clsx";
 import { useSession, signOut } from "next-auth/react";
 import { useState, useEffect, useRef } from "react";
+import { useClusterStore, useClusterPolling, type ModeInfo } from "@/lib/cluster-status";
+import type { BrokerState } from "@/lib/types";
 
 const AgentCanvas = dynamic(() => import("./AgentCanvas"), { ssr: false });
 
@@ -1591,11 +1593,219 @@ function ScenarioHistoryBar({ history, onView }: {
   );
 }
 
+// ── Cluster Statistics modal ──────────────────────────────────────────────────
+// Opened when the user clicks the "REAL mode" / "MOCK mode" badge in the nav.
+// Shows live Aiven connection details (from useClusterStore) + broker topology.
+
+function ClusterStatsModal({
+  modeInfo,
+  broker,
+  onClose,
+}: {
+  modeInfo: ModeInfo | null;
+  broker: BrokerState | null;
+  onClose: () => void;
+}) {
+  const kafka      = modeInfo?.kafka;
+  const isReal     = modeInfo?.mode === "real";
+  const isAiven    = isReal && !!kafka?.bootstrapInternal && !modeInfo?.kubeAvailable;
+  const host       = kafka?.bootstrapInternal?.split(":")[0] ?? "—";
+  const port       = kafka?.bootstrapInternal?.split(":")[1] ?? "—";
+  const hostShort  = host === "—" ? "—" : host.split(".").slice(0, 2).join(".") + "…";
+
+  const topics = broker ? Object.entries(broker.topics) : [];
+  const groups = broker ? Object.entries(broker.consumerGroups) : [];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-sm flex items-start justify-end pt-14 pr-3
+                 animate-[fadeIn_0.15s_ease-out]"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-[480px] overflow-hidden animate-[slideDown_0.2s_ease-out]"
+        style={{ maxHeight: "calc(100vh - 72px)", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 flex items-center justify-between"
+             style={{ background: "#1e3a5f", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "#93c5fd" }}>
+              {isAiven ? "Aiven · Direct Kafka" : isReal ? "Real Cluster" : "Simulator"}
+            </div>
+            <div className="text-sm font-bold text-white">Cluster Statistics</div>
+          </div>
+          <button onClick={onClose} className="text-xl leading-none" style={{ color: "#93c5fd" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#fff")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#93c5fd")}>×</button>
+        </div>
+
+        <div className="p-5 space-y-5">
+
+          {/* ── Connection info (real/Aiven) ── */}
+          {isReal && kafka && (
+            <section>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "#94a3b8" }}>
+                🔗 Connection
+              </div>
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: "#dce5ef" }}>
+                {[
+                  { label: "Bootstrap Host", value: host,                                                mono: true  },
+                  { label: "Port",           value: port,                                                mono: true  },
+                  { label: "SASL Mechanism", value: "SCRAM-SHA-256",                                    mono: false },
+                  { label: "Auth User",      value: kafka.username ?? "avnadmin",                       mono: true  },
+                  { label: "CA Certificate", value: kafka.hasCaCert ? "✓ Custom CA present" : "✗ None", mono: false, special: true, ok: kafka.hasCaCert },
+                  { label: "Password",       value: kafka.hasPassword ? "✓ Set" : "✗ Not set",          mono: false, special: true, ok: kafka.hasPassword },
+                ].map((r, i, arr) => (
+                  <div key={r.label}
+                    className="flex items-center justify-between px-4 py-2.5"
+                    style={{
+                      borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none",
+                      background: i % 2 === 0 ? "#fff" : "#f8fafc",
+                    }}>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>{r.label}</span>
+                    <span style={{
+                      fontSize: 11, fontWeight: 700,
+                      fontFamily: r.mono ? "monospace" : "inherit",
+                      color: r.special ? (r.ok ? "#16a34a" : "#f97316") : "#1e3a5f",
+                      maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {r.label === "Bootstrap Host" ? (
+                        <span title={host}>{hostShort}</span>
+                      ) : r.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Cluster status grid ── */}
+          {broker && (
+            <section>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "#94a3b8" }}>
+                ⬡ Cluster Status
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: "Mode",        value: broker.mode,                      color: broker.mode === "REAL" ? "#16a34a" : "#7c3aed" },
+                  { label: "Brokers",     value: `${broker.brokersOnline} online`,  color: "#1e3a5f" },
+                  { label: "Topics",      value: `${topics.length}`,               color: "#2563eb" },
+                  { label: "Ctrl Epoch",  value: `${broker.controllerEpoch}`,      color: "#1e3a5f" },
+                  { label: "ACLs",        value: `${broker.aclCount}`,           color: "#1e3a5f" },
+                  { label: "mTLS",        value: broker.mtls ? "on" : "off",       color: broker.mtls ? "#16a34a" : "#94a3b8" },
+                ].map((s) => (
+                  <div key={s.label} className="rounded-xl p-3 text-center border"
+                       style={{ background: "#f8fafc", borderColor: "#dce5ef" }}>
+                    <div style={{ fontSize: 9, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 2 }}>
+                      {s.label}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: s.color }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Topics breakdown ── */}
+          {topics.length > 0 && (
+            <section>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "#94a3b8" }}>
+                📋 Topics ({topics.length})
+              </div>
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: "#dce5ef" }}>
+                <table className="w-full" style={{ borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc", borderBottom: "1px solid #dce5ef" }}>
+                      {["Topic", "Parts", "Lag", "Offset"].map((h) => (
+                        <th key={h} className="text-left px-3 py-2"
+                          style={{ fontSize: 9, color: "#94a3b8", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topics.map(([name, td], i) => {
+                      return (
+                        <tr key={name}
+                          style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc", borderBottom: i < topics.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                          <td style={{ padding: "7px 12px", fontFamily: "monospace", fontSize: 10, color: "#1e3a5f", maxWidth: 180 }}>
+                            <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>
+                              {name.split(".").slice(-2).join(".")}
+                            </span>
+                          </td>
+                          <td style={{ padding: "7px 12px", textAlign: "center", fontSize: 11, fontWeight: 600, color: "#64748b" }}>{td.partitions}</td>
+                          <td style={{ padding: "7px 12px", textAlign: "center", fontSize: 11, fontWeight: 700,
+                                        color: td.lag > 100 ? "#dc2626" : td.lag > 0 ? "#d97706" : "#16a34a" }}>{td.lag}</td>
+                          <td style={{ padding: "7px 12px", textAlign: "center", fontSize: 11, fontWeight: 600, color: "#64748b" }}>{td.offsetHigh}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {/* ── Consumer groups ── */}
+          {groups.length > 0 && (
+            <section>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "#94a3b8" }}>
+                👥 Consumer Groups ({groups.length})
+              </div>
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: "#dce5ef" }}>
+                {groups.map(([name, gd], i) => {
+                  const stable = gd.rebalanceState?.toLowerCase() === "stable";
+                  return (
+                    <div key={name}
+                      className="flex items-center justify-between px-4 py-2.5"
+                      style={{ background: i % 2 === 0 ? "#fff" : "#f8fafc", borderBottom: i < groups.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <span style={{ fontSize: 11, fontFamily: "monospace", fontWeight: 600, color: "#1e3a5f" }}>{name}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: gd.lag > 0 ? "#d97706" : "#16a34a" }}>
+                          lag {gd.lag}
+                        </span>
+                        <span style={{
+                          fontSize: 9, fontWeight: 600, padding: "2px 7px", borderRadius: 20,
+                          background: stable ? "#dcfce7" : "#fef9c3",
+                          color: stable ? "#16a34a" : "#b45309",
+                          border: `1px solid ${stable ? "#86efac" : "#fde68a"}`,
+                        }}>
+                          {gd.rebalanceState}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#94a3b8" }}>{gd.members}m</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Mock / no-data fallback */}
+          {!isReal && !broker && (
+            <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "#94a3b8", fontStyle: "italic" }}>
+              Running in simulator mode — no real cluster data.
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction, triggerTopicHeal } = useMeshStream();
   const phase = state.mralPhase ?? "idle";
+
+  // Cluster polling — populates useClusterStore with real Aiven connection details
+  useClusterPolling();
+  const modeInfo = useClusterStore((s) => s.mode);
 
   // ── Topics state + live metrics animation ────────────────────────────────
   const [topics, setTopics] = useState<KafkaTopic[]>(INITIAL_TOPICS);
@@ -1701,6 +1911,7 @@ export default function Dashboard() {
 
   // ── Floating overlay states ────────────────────────────────────────────────
   const [brokerOpen, setBrokerOpen]           = useState(false);
+  const [clusterStatsOpen, setClusterStatsOpen] = useState(false);
 
   // Persistent scenario history — survives page refreshes via localStorage.
   // Always start with [] so SSR and client hydration match, then load after mount.
@@ -1709,7 +1920,9 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
 
   // Canvas height — +/- resizable
-  const [canvasHeight, setCanvasHeight] = useState(580);
+  // Default is 660 so the ephemeral REASON/ACT/LEARN sub-agent bubbles (y=545–635)
+  // are visible without needing to press + first.
+  const [canvasHeight, setCanvasHeight] = useState(660);
 
   // Load saved history from localStorage once after first client render
   useEffect(() => {
@@ -1857,12 +2070,24 @@ export default function Dashboard() {
             {state.connected ? "Live" : "Reconnecting…"}
           </div>
 
-          {/* Kafka mode */}
+          {/* Kafka mode — click to open Cluster Statistics panel */}
           {state.broker && (
-            <div className="text-xs font-semibold rounded-full px-3 py-1.5"
-                 style={{ background: "rgba(29,158,117,0.18)", color: "#9ADFC8", border: "1px solid rgba(29,158,117,0.3)" }}>
-              {state.broker.mode} mode
-            </div>
+            <button
+              onClick={() => setClusterStatsOpen((o) => !o)}
+              className="text-xs font-semibold rounded-full px-3 py-1.5 transition-all"
+              style={{
+                background: clusterStatsOpen ? "rgba(29,158,117,0.32)" : "rgba(29,158,117,0.18)",
+                color: "#9ADFC8",
+                border: "1px solid rgba(29,158,117,0.35)",
+                cursor: "pointer",
+                letterSpacing: "0.2px",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(29,158,117,0.28)")}
+              onMouseLeave={e => (e.currentTarget.style.background = clusterStatsOpen ? "rgba(29,158,117,0.32)" : "rgba(29,158,117,0.18)")}
+              title="View cluster statistics"
+            >
+              {state.broker.mode} mode ↗
+            </button>
           )}
 
           <button onClick={reset}
@@ -2077,9 +2302,9 @@ export default function Dashboard() {
                   <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8, marginTop: 2 }}>
                     <span style={{
                       fontSize: 12, fontWeight: 700,
-                      color: (state.broker.mtls !== false && state.broker.sasl !== false) ? "#16a34a" : "#f97316",
+                      color: (state.broker.mtls !== false || state.broker.sasl !== false) ? "#16a34a" : "#f97316",
                     }}>
-                      mTLS + SASL {(state.broker.mtls !== false && state.broker.sasl !== false) ? "✓ Secure" : "✗ Unsecured"}
+                      {state.broker.mtls !== false ? "mTLS + SASL" : "SASL"} {(state.broker.mtls !== false || state.broker.sasl !== false) ? "✓ Secure" : "✗ Unsecured"}
                     </span>
                   </div>
                 </div>
@@ -2240,6 +2465,13 @@ export default function Dashboard() {
           templateTopic={copyTemplate ?? undefined}
           onClose={() => { setCreateModalOpen(false); setCopyTemplate(null); }}
           onCreate={handleTopicCreate}
+        />
+      )}
+      {clusterStatsOpen && (
+        <ClusterStatsModal
+          modeInfo={modeInfo}
+          broker={state.broker}
+          onClose={() => setClusterStatsOpen(false)}
         />
       )}
       <ToastStack toasts={state.toasts} />

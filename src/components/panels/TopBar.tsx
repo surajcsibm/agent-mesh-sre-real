@@ -27,9 +27,12 @@ export function TopBar() {
   const snap = useClusterStore((s) => s.snapshot);
   const connect = useClusterStore((s) => s.connectInfo);
 
+  // Strimzi/k8s path: mode=real + snapshot shows cluster ready
   const isReal = mode?.mode === "real" && !!snap?.cluster.ready;
-  const realPartial = mode?.mode === "real" && !snap?.cluster.ready;
+  const realPartial = mode?.mode === "real" && !snap?.cluster.ready && !!mode?.kubeAvailable;
   const kubeReady = !!mode?.kubeAvailable && !!connect?.strimzi?.present;
+  // Direct Kafka path (Aiven / RedPanda / Confluent): mode=real + bootstrap set + no k8s
+  const isDirectKafka = mode?.mode === "real" && !!mode?.kafka?.bootstrapInternal && !mode?.kubeAvailable;
 
   return (
     <header className="border-b border-white/10 bg-bg-elev/60 backdrop-blur-md">
@@ -61,6 +64,8 @@ export function TopBar() {
           ready={isReal}
           partial={realPartial}
           kubeReady={kubeReady}
+          directKafka={isDirectKafka}
+          bootstrapHost={mode?.kafka?.bootstrapInternal?.split(":")[0]}
         />
 
         {/* Cluster strip */}
@@ -69,6 +74,8 @@ export function TopBar() {
 
           {isReal && snap ? (
             <RealStrip snapshot={snap} audit={audit} />
+          ) : isDirectKafka && mode?.kafka ? (
+            <DirectKafkaStrip kafka={mode.kafka} audit={audit} />
           ) : sim ? (
             <MockStrip sim={sim} audit={audit} />
           ) : null}
@@ -93,18 +100,29 @@ function ModeBadge({
   ready,
   partial,
   kubeReady,
+  directKafka,
+  bootstrapHost,
 }: {
   mode: "mock" | "real";
   ready: boolean;
   partial: boolean;
   kubeReady: boolean;
+  directKafka?: boolean;
+  bootstrapHost?: string;
 }) {
-  const label = mode === "real" ? (ready ? "Real cluster" : partial ? "Real (provisioning)" : "Real (no cluster yet)") : "Simulator";
+  const label = mode === "real"
+    ? directKafka ? "Aiven Kafka · Connected"
+    : ready ? "Real cluster"
+    : partial ? "Real (provisioning)"
+    : "Real (no cluster yet)"
+    : "Simulator";
   const sub = mode === "real"
-    ? ready ? "Strimzi-managed Kafka 4.2 KRaft" : "Awaiting Kafka CR Ready"
+    ? directKafka ? (bootstrapHost ?? "Direct Kafka · SASL/SCRAM-256")
+    : ready ? "Strimzi-managed Kafka 4.2 KRaft"
+    : "Awaiting Kafka CR Ready"
     : kubeReady ? "Kube + Strimzi reachable — switch in Setup" : "In-process Kafka simulator";
   const c = mode === "real"
-    ? ready ? "#22c55e" : "#fbbf24"
+    ? (directKafka || ready) ? "#22c55e" : "#fbbf24"
     : "#a78bfa";
   return (
     <div
@@ -157,6 +175,27 @@ function RealStrip({
       {c.clusterId ? (
         <Pill icon={<Boxes size={11} />} label="ClusterId" value={c.clusterId.slice(0, 8) + "…"} tone="info" />
       ) : null}
+    </>
+  );
+}
+
+function DirectKafkaStrip({
+  kafka,
+  audit,
+}: {
+  kafka: NonNullable<import("@/lib/cluster-status").ModeInfo["kafka"]>;
+  audit: number;
+}) {
+  const host = kafka.bootstrapInternal?.split(":")[0] ?? "unknown";
+  const port = kafka.bootstrapInternal?.split(":")[1] ?? "";
+  return (
+    <>
+      <Pill icon={<Cpu size={11} />} label="Kafka" value="Aiven · SASL/SCRAM-256" tone="ok" />
+      <Pill icon={<Database size={11} />} label="Broker" value={`${host.split(".")[0]}${port ? `:${port}` : ""}`} tone="ok" />
+      <Pill icon={<Lock size={11} />} label="TLS" value="custom CA" tone="ok" />
+      <Pill icon={<KeyRound size={11} />} label="Auth" value={kafka.username ?? "avnadmin"} tone="ok" />
+      <Pill icon={<ShieldCheck size={11} />} label="CA cert" value={kafka.hasCaCert ? "✓" : "✗"} tone={kafka.hasCaCert ? "ok" : "warn"} />
+      <Pill icon={<Activity size={11} />} label="Audit" value={`${audit} writes`} tone="info" />
     </>
   );
 }

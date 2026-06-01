@@ -16,6 +16,10 @@ import type {
   NotificationRecord, LessonRecord, ApprovalRequest, MCPToolCall,
 } from "./types";
 
+// ── Broker mode (set by useMeshStream once initial SSE state arrives) ─────────
+let _brokerMode: "MOCK" | "REAL" = "MOCK";
+export function setBrokerMode(m: "MOCK" | "REAL") { _brokerMode = m; }
+
 // ── Types mirrored from useMeshStream.ts ─────────────────────────────────────
 
 type DispatchFn = (action: SimAction) => void;
@@ -112,6 +116,26 @@ function baseAgents(): AgentState[] {
 }
 
 function mockBroker(lagOverride = 0): BrokerState {
+  // When connected to a real Kafka cluster, preserve REAL mode and single-node topology
+  if (_brokerMode === "REAL") {
+    return {
+      mode: "REAL", controllerEpoch: 1, brokersOnline: 1,
+      mtls: false, sasl: true, aclCount: 0,
+      topics: {
+        "ops.requests.v1":      { partitions: 1, lag: 0,           offsetHigh: 100 },
+        "ops.kafka.metrics.v1": { partitions: 1, lag: lagOverride, offsetHigh: 500 },
+        "ops.incidents.v1":     { partitions: 1, lag: 0,           offsetHigh: 40  },
+        "ops.actions.audit.v1": { partitions: 1, lag: 0,           offsetHigh: 60  },
+        "ops.lessons.v1":       { partitions: 1, lag: 0,           offsetHigh: 12  },
+        "ops.notifications.v1": { partitions: 1, lag: 0,           offsetHigh: 24  },
+        "demo.payments.events": { partitions: 1, lag: 0,           offsetHigh: 0   },
+      },
+      consumerGroups: {
+        "payments-consumer": { lag: lagOverride, rebalanceState: lagOverride > 0 ? "Rebalancing" : "Stable", members: 1 },
+        "sre-monitor":       { lag: 0,           rebalanceState: "Stable",       members: 1 },
+      },
+    };
+  }
   return {
     mode: "MOCK", controllerEpoch: 14, brokersOnline: 3,
     mtls: true, sasl: true, aclCount: 18,

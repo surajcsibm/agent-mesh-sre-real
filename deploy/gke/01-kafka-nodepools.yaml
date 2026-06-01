@@ -1,0 +1,70 @@
+# GKE demo sizing — 1 controller + 1 broker (total ~3 GiB RAM, ~30 GiB PD-SSD).
+# The OpenShift base uses 3+3 for HA; this variant is cost-optimised for
+# a single-developer demo on GKE Autopilot.
+#
+# To scale up after the demo, edit replicas: 1 → 3 on both pools and
+# update replication factors in 02-kafka-cluster.yaml accordingly.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: controller
+  namespace: agent-mesh-sre
+  labels:
+    strimzi.io/cluster: agent-mesh-kafka
+    app.kubernetes.io/part-of: agent-mesh-sre
+    app.kubernetes.io/component: kafka-controller
+spec:
+  replicas: 1
+  roles:
+    - controller
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        deleteClaim: true
+        kraftMetadata: shared
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: "250m"
+    limits:
+      memory: 1Gi
+      cpu: "500m"
+  jvmOptions:
+    -Xms: 256m
+    -Xmx: 512m
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: broker
+  namespace: agent-mesh-sre
+  labels:
+    strimzi.io/cluster: agent-mesh-kafka
+    app.kubernetes.io/part-of: agent-mesh-sre
+    app.kubernetes.io/component: kafka-broker
+spec:
+  replicas: 1
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 10Gi
+        deleteClaim: true
+        kraftMetadata: shared
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: "500m"
+    limits:
+      memory: 2Gi
+      cpu: "1"
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 1g
