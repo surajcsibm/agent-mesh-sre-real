@@ -87,17 +87,29 @@ class MockConsumer implements MeshConsumer {
 async function buildRealProducer(): Promise<MeshProducer> {
   const { Kafka, logLevel } = await import("kafkajs");
 
+const sslConfig = process.env.KAFKA_SSL_CA_B64
+    ? {
+        rejectUnauthorized: true,
+        ca: [Buffer.from(process.env.KAFKA_SSL_CA_B64, "base64").toString("utf-8")],
+      }
+    : true;
+
+  
   const kafka = new Kafka({
     clientId: "agent-mesh-sre-producer",
     brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS!],
-    ssl: true,
+    ssl: sslConfig,
     sasl: {
-      mechanism: "plain",
+      mechanism: (process.env.KAFKA_SASL_MECHANISM ?? "plain") as
+        | "plain"
+        | "scram-sha-256"
+        | "scram-sha-512",
       username: process.env.KAFKA_SASL_USERNAME!,
       password: process.env.KAFKA_SASL_PASSWORD!,
     },
     logLevel: logLevel.WARN,
   });
+ 
 
   const producer = kafka.producer({
     allowAutoTopicCreation: false,
@@ -152,12 +164,22 @@ async function buildRealProducer(): Promise<MeshProducer> {
 async function buildRealConsumer(groupId = "agent-mesh-sre-monitor"): Promise<MeshConsumer> {
   const { Kafka, logLevel } = await import("kafkajs");
 
+const sslConfig = process.env.KAFKA_SSL_CA_B64
+    ? {
+        rejectUnauthorized: true,
+        ca: [Buffer.from(process.env.KAFKA_SSL_CA_B64, "base64").toString("utf-8")],
+      }
+    : true;
+
   const kafka = new Kafka({
     clientId: "agent-mesh-sre-consumer",
     brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS!],
-    ssl: true,
+    ssl: sslConfig,
     sasl: {
-      mechanism: "plain",
+      mechanism: (process.env.KAFKA_SASL_MECHANISM ?? "plain") as
+        | "plain"
+        | "scram-sha-256"
+        | "scram-sha-512",
       username: process.env.KAFKA_SASL_USERNAME!,
       password: process.env.KAFKA_SASL_PASSWORD!,
     },
