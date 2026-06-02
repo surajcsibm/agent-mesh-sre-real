@@ -53,10 +53,12 @@ function reducer(state: MeshClientState, action: Action): MeshClientState {
     case "state": return {
       ...state,
       ...action.payload,
-      auditLog:      action.payload.auditLog      ?? state.auditLog,
-      lessons:       action.payload.lessons       ?? state.lessons,
-      notifications: action.payload.notifications ?? state.notifications,
-      scenarioRunning: action.payload.scenarioRunning ?? state.scenarioRunning,
+      auditLog:         action.payload.auditLog         ?? state.auditLog,
+      lessons:          action.payload.lessons          ?? state.lessons,
+      notifications:    action.payload.notifications    ?? state.notifications,
+      scenarioRunning:  action.payload.scenarioRunning  ?? state.scenarioRunning,
+      // Preserve existing pendingApprovals if SSE payload doesn't include them
+      pendingApprovals: action.payload.pendingApprovals ?? state.pendingApprovals,
     };
     case "audit": return { ...state, auditLog: [...state.auditLog.slice(-199), action.record] };
     case "toast": return { ...state, toasts: [...state.toasts, { id: action.id, message: action.message, kind: action.kind }] };
@@ -114,12 +116,12 @@ export function useMeshStream() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const brokerMode = (event as any).broker?.mode;
             if (brokerMode === "REAL" || brokerMode === "MOCK") setBrokerMode(brokerMode);
-            // Strip pendingApprovals from SSE payloads — approvals are managed
-            // exclusively by client-sim. On localhost the Next.js dev server
-            // retains scenario state across page refreshes in globalThis, so the
-            // SSE stream would replay stale approvals and double-show the gate.
+            // Preserve pendingApprovals set by client-sim — SSE state updates
+            // must NOT zero them out or the approval gate disappears immediately.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            dispatch({ type: "state", payload: { ...(event as any), pendingApprovals: [] } });
+            const ssePayload = { ...(event as any) };
+            delete ssePayload.pendingApprovals;
+            dispatch({ type: "state", payload: ssePayload });
             break;
           }
           case "audit":

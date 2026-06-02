@@ -217,7 +217,9 @@ export type BusEvent =
   | { type: "particle"; edgeId: string; fromNode: string; toNode: string }
   | { type: "toast"; message: string; kind: "info" | "success" | "warning" | "error" }
   | { type: "notification"; record: NotificationRecord }
-  | { type: "lesson"; record: LessonRecord };
+  | { type: "lesson"; record: LessonRecord }
+  | { type: "approval-new"; payload: ApprovalRequest }
+  | { type: "approval-update"; payload: ApprovalRequest };
 
 // ── Wire-protocol types (kind-discriminated, used by store + sse-client) ──────
 

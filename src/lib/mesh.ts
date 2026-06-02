@@ -192,6 +192,10 @@ export function resolveApproval(id: string, decision: "approve" | "reject", acto
   const resolver = s.approvalResolvers.get(id);
   if (resolver) { s.approvalResolvers.delete(id); resolver(decision); }
   audit("approval", "system", `Approval ${decision}d by ${actor} for: ${approval.toolCall.params.name}`, { id, decision, actor });
+   // Notify UI that approval status changed
+  import("./event-bus").then(({ getEventBus }) =>
+    getEventBus().publish({ type: "approval-update", payload: approval })
+  );
   broadcastState();
   return true;
 }
@@ -440,6 +444,10 @@ async function runLagSpike() {
   broadcastState();
   toast("Policy gate: approval required for kafka.scaleConsumers", "warning");
 
+import("./event-bus").then(({ getEventBus }) =>
+  getEventBus().publish({ type: "approval-new", payload: approval })
+);
+
   const decision = await waitForApproval(approvalId);
   if (decision === "reject") {
     setMral("idle"); setAgent("monitor", { status: "online", mralPhase: "idle" });
@@ -558,9 +566,10 @@ async function runShareGroup() {
   setAgent("monitor", { mralPhase: "awaiting", status: "awaiting-approval" });
   const approvalId = uid();
   const approval: ApprovalRequest = {
-    id: approvalId, ts: Date.now(), agent: "monitor",
-    toolCall: reasoning.proposedToolCall!, scenarioId: "share-group", status: "pending",
-  };
+  id: approvalId, ts: Date.now(), agent: "monitor",
+  toolCall: reasoning.proposedToolCall!, scenarioId: "share-group", status: "pending",
+  createdAt: Date.now(),
+};
   s.pendingApprovals.push(approval);
   broadcastState();
   toast("Policy gate: approval required for kafka.checkpointShareGroup", "warning");

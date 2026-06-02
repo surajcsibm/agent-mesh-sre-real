@@ -2422,6 +2422,7 @@ export default function Dashboard() {
       </div>
 
       {/* Overlays */}
+      {console.log("[Dashboard] pendingApprovals:", state.pendingApprovals)}
       <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} />
       {state.emailSummary && (
         <ScenarioEndModal

@@ -487,60 +487,117 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
 
 function runShareGroupRebalance(dispatch: DispatchFn): () => void {
   let agents = baseAgents();
-  return schedule([
-    { ms: 0, fn: () => {
-      agents = patch(agents, "intake", { status: "acting" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
-      particle(dispatch, "e-req", "intake", "monitor");
-      toast(dispatch, "🔄 Share-group rebalance initiated", "info");
-      dispatch({ type: "audit", record: auditRec("intake", "Published share-group-rebalance event to ops.requests.v1", "publish", "ops.requests.v1") });
-    }},
-    { ms: 2500, fn: () => {
-      agents = patch(agents, "intake",  { status: "online" });
-      agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(600), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
-      dispatch({ type: "audit", record: auditRec("monitor", "KIP-932 share-group rebalance detected: payments-share-group · 600 msgs behind", "reasoning") });
-    }},
-    { ms: 4500, fn: () => {
-      dispatch({ type: "audit", record: auditRec("monitor", "Confidence 91% · checkpointing offsets prevents duplicate delivery during rebalance", "reasoning") });
-    }},
-    { ms: 6000, fn: () => {
-      agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(600), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
-      dispatch({ type: "audit", record: auditRec("monitor", "Executing kafka.checkpointShareGroup(shareGroupId=payments-share-group) · offset committed", "tool-call") });
-      particle(dispatch, "e-inc", "monitor", "writer");
-    }},
-    { ms: 9000, fn: () => {
-      agents = patch(agents, "monitor", { status: "online" });
-      agents = patch(agents, "writer",  { status: "acting" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
-      dispatch({ type: "audit", record: auditRec("writer", "Consuming incident · drafting share-group postmortem · publishing to ops.actions.audit.v1", "consume") });
-      particle(dispatch, "e-aud", "writer", "notification");
-    }},
-    { ms: 12000, fn: () => {
-      agents = patch(agents, "writer",       { status: "online" });
-      agents = patch(agents, "notification", { status: "acting" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
-      dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Share-group rebalance", message: "✅ payments-share-group rebalance complete — offsets checkpointed", scenarioId: "share-group-rebalance" } });
-      dispatch({ type: "audit", record: auditRec("notification", "Slack #sre-alerts posted · ITSM ticket opened · email summary dispatched", "notification") });
-      sendEmail(dispatch, "share-group", "Share Group Rebalance", 600, 0, "kafka.checkpointShareGroup", {
-        approvedBy: "operator",
-        reasoning: {
-          rootCause: "KIP-932 share group rebalance detected on payments-share-group (600 msgs behind)",
-          confidence: 0.91, kafkaFeature: "KIP-932 Share Groups",
-          rationale: "Share group rebalance triggered by consumer join. Checkpointing offsets prevents duplicate delivery.",
-        },
-        lesson: { notes: "Share group checkpoint prevented duplicate message delivery during rebalance." },
-        slackMessage: "✅ Share group rebalance resolved · offsets checkpointed · lag 600→0",
-        itsmTicket: `INC-${Date.now().toString().slice(-5)} closed — kafka.checkpointShareGroup resolved share group lag`,
-      });
-    }},
-    { ms: 15000, fn: () => {
-      agents = patch(agents, "notification", { status: "online" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
-      toast(dispatch, "✅ Share-group rebalance handled", "success");
-    }},
-  ]);
+  const allTimers: ReturnType<typeof setTimeout>[] = [];
+
+  // Steps 1-2: monitor detects rebalance and reasons
+  allTimers.push(setTimeout(() => {
+    agents = patch(agents, "intake", { status: "acting" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    particle(dispatch, "e-req", "intake", "monitor");
+    toast(dispatch, "🔄 Share-group rebalance initiated", "info");
+    dispatch({ type: "audit", record: auditRec("intake", "Published share-group-rebalance event to ops.requests.v1", "publish", "ops.requests.v1") });
+  }, 0));
+
+  allTimers.push(setTimeout(() => {
+    agents = patch(agents, "intake",  { status: "online" });
+    agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason" });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(600), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "KIP-932 share-group rebalance detected: payments-share-group · 600 msgs behind", "reasoning") });
+  }, 2500));
+
+  allTimers.push(setTimeout(() => {
+    dispatch({ type: "audit", record: auditRec("monitor", "Confidence 91% · checkpointing offsets prevents duplicate delivery during rebalance", "reasoning") });
+  }, 4500));
+
+  // t≈6s — pause for human approval before checkpoint
+  allTimers.push(setTimeout(() => {
+    const toolCall: MCPToolCall = {
+      jsonrpc: "2.0", id: uid(), method: "tools/call",
+      params: { name: "kafka.checkpointShareGroup", arguments: { shareGroupId: "payments-share-group", reason: "KIP-932 rebalance: 600 msgs behind" } },
+    };
+    const approval: ApprovalRequest = {
+      id: uid(), ts: Date.now(), createdAt: Date.now(),
+      agent: "monitor", proposedBy: "monitor-agent",
+      toolCall, scenarioId: "share-group-rebalance",
+      reason: "Checkpoint payments-share-group offsets to prevent duplicate delivery during KIP-932 rebalance",
+      status: "pending",
+    };
+    agents = patch(agents, "monitor", {
+      status: "awaiting-approval", mralPhase: "awaiting",
+      lastReasoning: {
+        rootCause: "KIP-932 share group rebalance on payments-share-group: 600 messages behind",
+        confidence: 0.91,
+        kafkaFeatureCited: "KIP-932 Share Groups",
+        rebalanceState: "Rebalancing",
+        controllerEpoch: 14,
+        crossCorrelation: { brokers: "healthy", jvmHeap: "62%", networkInRate: "↑ 1.4×", rebalanceInProgress: true },
+        recommendedAction: "kafka.checkpointShareGroup(shareGroupId=payments-share-group)",
+        requiresApproval: true,
+        rationale: "Share group rebalance triggered by consumer join. Checkpointing offsets prevents duplicate delivery during transition.",
+        lessonsCited: [],
+      },
+    });
+    console.log("[client-sim] dispatching share-group approval gate", approval);
+    dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(600), pendingApprovals: [approval], incidentQueueDepth: 1, scenarioRunning: true } });
+    dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.checkpointShareGroup (policy-gated, human-in-the-loop)", "approval") });
+    toast(dispatch, "⏳ Approval required: kafka.checkpointShareGroup — check the approval panel", "warning");
+
+    _pendingApprovalCallback = (approved: boolean) => {
+      if (approved) {
+        // ── APPROVED PATH ──────────────────────────────────────────────────
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(600), pendingApprovals: [], incidentQueueDepth: 1, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Approved by operator · executing kafka.checkpointShareGroup(shareGroupId=payments-share-group)", "approval") });
+          particle(dispatch, "e-inc", "monitor", "writer");
+        }, 300));
+
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online" });
+          agents = patch(agents, "writer",  { status: "acting" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "audit", record: auditRec("writer", "Consuming incident · drafting share-group postmortem · publishing to ops.actions.audit.v1", "consume") });
+          particle(dispatch, "e-aud", "writer", "notification");
+        }, 3000));
+
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "writer",       { status: "online" });
+          agents = patch(agents, "notification", { status: "acting" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: true } });
+          dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Share-group rebalance", message: "✅ payments-share-group rebalance complete — offsets checkpointed", scenarioId: "share-group-rebalance" } });
+          dispatch({ type: "audit", record: auditRec("notification", "Slack #sre-alerts posted · ITSM ticket opened · email summary dispatched", "notification") });
+          sendEmail(dispatch, "share-group", "Share Group Rebalance", 600, 0, "kafka.checkpointShareGroup", {
+            approvedBy: "operator",
+            reasoning: {
+              rootCause: "KIP-932 share group rebalance detected on payments-share-group (600 msgs behind)",
+              confidence: 0.91, kafkaFeature: "KIP-932 Share Groups",
+              rationale: "Share group rebalance triggered by consumer join. Checkpointing offsets prevents duplicate delivery.",
+            },
+            lesson: { notes: "Share group checkpoint prevented duplicate message delivery during rebalance." },
+            slackMessage: "✅ Share group rebalance resolved · offsets checkpointed · lag 600→0",
+            itsmTicket: `INC-${Date.now().toString().slice(-5)} closed — kafka.checkpointShareGroup resolved share group lag`,
+          });
+        }, 6000));
+
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "notification", { status: "online" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+          toast(dispatch, "✅ Share-group rebalance approved and handled", "success");
+        }, 9000));
+
+      } else {
+        // ── REJECTED PATH ──────────────────────────────────────────────────
+        allTimers.push(setTimeout(() => {
+          agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 0, scenarioRunning: false } });
+          dispatch({ type: "audit", record: auditRec("monitor", "Action REJECTED by operator — kafka.checkpointShareGroup not executed, scenario aborted", "approval") });
+          toast(dispatch, "🚫 Rejected — kafka.checkpointShareGroup not executed", "error");
+        }, 300));
+      }
+    };
+  }, 6000));
+
+  return () => { allTimers.forEach(clearTimeout); };
 }
 
 function runPartitionImbalance(dispatch: DispatchFn): () => void {
