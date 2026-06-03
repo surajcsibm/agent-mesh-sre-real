@@ -19,11 +19,11 @@ export const config = {
   matcher: [
     /*
      * Protect everything EXCEPT:
-     *  - /api/auth/**         (NextAuth callbacks)
+     *  - /api/auth|api/admin/**         (NextAuth callbacks)
      *  - /login               (sign-in page itself)
      *  - /_next/**            (Next.js internals)
      *  - /favicon.ico
      */
-    "/((?!api/auth|login|_next/static|_next/image|favicon\\.ico).*)",
+    "/((?!api/auth|api/admin|login|_next/static|_next/image|favicon\\.ico).*)",
   ],
 };
