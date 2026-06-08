@@ -2,13 +2,14 @@
 import { eventBus } from "@/lib/event-bus";
 import { getSnapshot } from "@/lib/mesh";
 import { startMonitorPolling } from "@/lib/monitor-poll";
+import { startAnomalySimulation } from "@/lib/anomaly-sim";
 
 export const dynamic    = "force-dynamic";
 export const maxDuration = 60; // Vercel: keep the serverless function alive for SSE
 
-startMonitorPolling();
-
 export async function GET() {
+  startMonitorPolling();
+  startAnomalySimulation();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

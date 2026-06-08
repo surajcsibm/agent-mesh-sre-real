@@ -809,6 +809,18 @@ export function getSnapshot() {
   };
 }
 
+/**
+ * Directly mutates the live BrokerState singleton.
+ * Use this (not getSnapshot) whenever you need to write to broker fields —
+ * getSnapshot returns a shallow copy and primitive-field writes are lost.
+ */
+export function patchBrokerState(
+  patcher: (broker: import("./types").BrokerState) => void
+): void {
+  patcher(getMeshState().broker);
+}
+
+
 /** Convenience accessor — returns an object with all mesh actions bundled. */
 export function getMesh() {
   return {

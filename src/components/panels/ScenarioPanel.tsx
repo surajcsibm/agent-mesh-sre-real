@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Activity,
+  Eye,
   Eye,
   AlertTriangle,
   CircuitBoard,
@@ -78,11 +79,103 @@ type ScenarioApiResponse = {
   warning?: string;
 };
 
+
+// ── Map ScenarioPanel keys → monitor-poll PollScenarioId ────────────────────
+const POLL_ID_MAP: Record<string, string> = {
+  "lag-spike":             "lag-spike",
+  "controller-failover":   "controller-failover",
+  "share-group-rebalance": "share-group",
+  "share-group":           "share-group",
+  "partition-imbalance":   "benign-rebalance",
+  "benign-rebalance":      "benign-rebalance",
+  "schema-mismatch":       "schema-mismatch",
+  "disk-saturation":       "disk-saturation",
+  "under-replication":     "under-replication",
+  "producer-timeout":      "producer-timeout",
+  "consumer-session-timeout": "consumer-session-timeout",
+  "compaction-lag":        "compaction-lag",
+};
+
+interface DetectionState {
+  detectedIds:  Set<string>;   // scenario IDs detected this cycle
+  triggeredIds: Set<string>;   // scenario IDs that auto-fired (non-suppress)
+  suppressedIds: Set<string>;  // scenario IDs suppressed this cycle
+  cycleCount:   number;
+  running:      boolean;
+}
+
+function useMonitorDetection(): DetectionState {
+  const [state, setState] = useState<DetectionState>({
+    detectedIds: new Set(), triggeredIds: new Set(), suppressedIds: new Set(),
+    cycleCount: 0, running: false,
+  });
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mesh/poll");
+      if (!res.ok) return;
+      const { poll } = await res.json();
+      const detected  = new Set<string>();
+      const triggered = new Set<string>();
+      const suppressed = new Set<string>();
+      for (const d of (poll.detectedThisCycle ?? [])) {
+        detected.add(d.scenarioId);
+        if (d.gate === "suppress") suppressed.add(d.scenarioId);
+        else triggered.add(d.scenarioId);
+      }
+      setState({ detectedIds: detected, triggeredIds: triggered, suppressedIds: suppressed,
+                 cycleCount: poll.cycleCount ?? 0, running: poll.running ?? false });
+    } catch { /* poll endpoint not available */ }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const iv = setInterval(refresh, 5_000);
+    return () => clearInterval(iv);
+  }, [refresh]);
+
+  return state;
+}
+
+// ── Detection ring badge ──────────────────────────────────────────────────────
+function DetectionBadge({ scenarioKey, detection }: {
+  scenarioKey: string;
+  detection: DetectionState;
+}) {
+  const pollId = POLL_ID_MAP[scenarioKey];
+  if (!pollId) return null;
+
+  const isSuppressed = detection.suppressedIds.has(pollId);
+  const isTriggered  = detection.triggeredIds.has(pollId);
+  const isDetected   = detection.detectedIds.has(pollId);
+
+  if (!isDetected) return null;
+
+  if (isSuppressed) {
+    return (
+      <span className="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded"
+        style={{ background: "#a78bfa18", border: "1px solid #a78bfa40", color: "#a78bfa" }}>
+        <span>⊘</span> suppressed
+      </span>
+    );
+  }
+
+  const c = isTriggered ? "#fbbf24" : "#22d3ee";
+  const label = isTriggered ? "⚡ triggered" : "● detected";
+  return (
+    <span className="flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded"
+      style={{ background: `${c}18`, border: `1px solid ${c}40`, color: c }}>
+      {label}
+    </span>
+  );
+}
+
 export function ScenarioPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const mode = useClusterStore((s) => s.mode?.mode ?? "mock");
   const isReal = mode === "real";
   const push = useToasts((s) => s.push);
+  const detection = useMonitorDetection();
 
   async function run(s: typeof SCENARIOS[number]) {
     setBusy(s.key);
@@ -168,7 +261,17 @@ export function ScenarioPanel() {
       <MonitorStatusCard />
       <div>
         <div className="flex items-center justify-between mb-2 px-0.5">
-          <div className="text-[10.5px] uppercase tracking-wider font-mono text-fg-dim">Run a scenario</div>
+          <div className="flex items-center gap-1.5">
+            <div className="text-[10.5px] uppercase tracking-wider font-mono text-fg-dim">Run a scenario</div>
+            {detection.running && (
+              <span className="flex items-center gap-1 text-[9.5px] font-mono"
+                style={{ color: "#22d3ee" }} title={`Monitor polling · cycle ${detection.cycleCount}`}>
+                <span className="agent-pulse rounded-full block"
+                  style={{ width: 5, height: 5, background: "#22d3ee", boxShadow: "0 0 6px #22d3ee" }} />
+                {detection.cycleCount > 0 ? `c${detection.cycleCount}` : "…"}
+              </span>
+            )}
+          </div>
           <ModeChip isReal={isReal} />
         </div>
         <div className="space-y-2">
@@ -178,7 +281,17 @@ export function ScenarioPanel() {
               disabled={busy !== null}
               onClick={() => run(s)}
               className="w-full text-left rounded-lg border border-white/10 bg-bg-elev hover:border-white/25 transition-colors p-3 disabled:opacity-60"
-              style={{ background: `linear-gradient(180deg, ${s.color}10, transparent)` }}
+              style={{
+                background: `linear-gradient(180deg, ${s.color}10, transparent)`,
+                boxShadow: (() => {
+                  const pid = POLL_ID_MAP[s.key];
+                  if (!pid) return undefined;
+                  if (detection.suppressedIds.has(pid)) return "0 0 0 1.5px #a78bfa55";
+                  if (detection.triggeredIds.has(pid))  return "0 0 0 1.5px #fbbf2455, 0 0 12px #fbbf2420";
+                  if (detection.detectedIds.has(pid))   return "0 0 0 1.5px #22d3ee55, 0 0 12px #22d3ee20";
+                  return undefined;
+                })(),
+              }}
             >
               <div className="flex items-start gap-2.5">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${s.color}1f`, border: `1px solid ${s.color}40` }}>
@@ -188,6 +301,7 @@ export function ScenarioPanel() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <div className="text-[12.5px] font-semibold text-fg-base">{s.title}</div>
                     <span className="tag" style={{ color: s.color, borderColor: `${s.color}55` }}>{s.tag}</span>
+                    <DetectionBadge scenarioKey={s.key} detection={detection} />
                     {isReal && (
                       <span
                         className="tag flex items-center gap-1"

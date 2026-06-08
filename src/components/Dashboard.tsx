@@ -1,4 +1,5 @@
 "use client";
+import React from "react";
 
 import dynamic from "next/dynamic";
 import { useMeshStream } from "./useMeshStream";
@@ -35,6 +36,82 @@ const EXTRA_SCENARIOS = [
 const SCENARIOS = [...PINNED_SCENARIOS, ...EXTRA_SCENARIOS];
 
 // ── Semantic colour maps ──────────────────────────────────────────────────────
+
+
+// ── Monitor poll detection hook ───────────────────────────────────────────────
+interface MonDetection {
+  detected:   Set<string>;
+  triggered:  Set<string>;
+  suppressed: Set<string>;
+  cycleCount: number;
+  running:    boolean;
+}
+
+function emptyDet(): MonDetection {
+  return { detected: new Set(), triggered: new Set(), suppressed: new Set(), cycleCount: 0, running: false };
+}
+
+function useMonitorDetection(): MonDetection {
+  const [det, setDet] = React.useState<MonDetection>(emptyDet);
+  React.useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const r = await fetch("/api/mesh/poll");
+        if (!r.ok || !alive) return;
+        const { poll } = await r.json();
+        const detected = new Set<string>(), triggered = new Set<string>(), suppressed = new Set<string>();
+        for (const d of (poll.detectedThisCycle ?? [])) {
+          detected.add(d.scenarioId);
+          (d.gate === "suppress" ? suppressed : triggered).add(d.scenarioId);
+        }
+        setDet({ detected, triggered, suppressed, cycleCount: poll.cycleCount ?? 0, running: poll.running ?? false });
+      } catch { /* poll not ready */ }
+    };
+    refresh();
+    const iv = setInterval(refresh, 5_000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  return det;
+}
+
+// Which Monitor scenarios signal a problem for a given topic?
+function topicRelatedScenarios(t: { lagTotal: number; replicationFactor: number; msgPerSec: number; status: string }, det: MonDetection): string[] {
+  const r: string[] = [];
+  if (t.status !== "healthy") {
+    if (t.lagTotal > 5_000 && det.detected.has("lag-spike"))                r.push("lag-spike");
+    if (t.lagTotal > 3_000 && det.detected.has("consumer-session-timeout")) r.push("consumer-session-timeout");
+    if (t.msgPerSec  < 20  && det.detected.has("producer-timeout"))         r.push("producer-timeout");
+    if (t.replicationFactor < 3 && det.detected.has("under-replication"))   r.push("under-replication");
+  }
+  if (det.detected.has("disk-saturation"))  r.push("disk-saturation");
+  if (det.detected.has("compaction-lag"))   r.push("compaction-lag");
+  return r;
+}
+
+// Ring style for a scenario button based on detection state
+function scenarioRing(id: string, det: MonDetection): React.CSSProperties {
+  if (det.suppressed.has(id)) return { boxShadow: "0 0 0 1.5px #a78bfa55" };
+  if (det.triggered.has(id))  return { boxShadow: "0 0 0 2px #fbbf2460, 0 0 14px #fbbf2430" };
+  if (det.detected.has(id))   return { boxShadow: "0 0 0 1.5px #22d3ee55, 0 0 10px #22d3ee20" };
+  return {};
+}
+
+// Small inline badge for detected scenarios
+function DetBadge({ id, det }: { id: string; det: MonDetection }) {
+  if (!det.detected.has(id)) return null;
+  const [c, icon, label] = det.suppressed.has(id)
+    ? ["#a78bfa", "⊘", "suppressed"]
+    : det.triggered.has(id)
+    ? ["#fbbf24", "⚡", "auto-fired"]
+    : ["#22d3ee", "●", "detected"];
+  return (
+    <span style={{ background: c + "18", border: `1px solid ${c}40`, color: c }}
+      className="text-[9.5px] font-mono px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5">
+      {icon} {label}
+    </span>
+  );
+}
 
 const POLL_COLOR = "#0e7490";
 const AUDIT_COLOR: Record<string, string> = {
@@ -982,7 +1059,7 @@ const SCENARIO_AUTO_TOPICS: Record<string, Omit<KafkaTopic, "id" | "createdAt">[
 // ── Topics panel — in left sidebar ───────────────────────────────────────────
 
 function TopicsPanel({
-  topics, prevLagRef, onSelect, onCreateNew, visibleCount, onShowMore,
+  topics, prevLagRef, onSelect, onCreateNew, visibleCount, onShowMore, monDet,
 }: {
   topics: KafkaTopic[];
   prevLagRef: React.MutableRefObject<Record<string, number>>;
@@ -990,7 +1067,9 @@ function TopicsPanel({
   onCreateNew: () => void;
   visibleCount: number;
   onShowMore: () => void;
+  monDet?: MonDetection;
 }) {
+  const det = monDet ?? emptyDet();
   // Sort: newest first (most recently created/updated topic at top)
   const sorted = [...topics].sort((a, b) => b.createdAt - a.createdAt);
   const visible = sorted.slice(0, visibleCount);
@@ -1056,6 +1135,17 @@ function TopicsPanel({
                 <span style={{ color: "#cbd5e1" }}>·</span>
                 <span className="font-medium">{t.msgPerSec}/s</span>
               </div>
+              {topicRelatedScenarios(t, det).length > 0 && (
+                <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+                  {topicRelatedScenarios(t, det).map(sid => (
+                    <span key={sid}
+                      className="text-[9px] font-mono px-1.5 py-0.5 rounded-md"
+                      style={{ background: "#22d3ee12", border: "1px solid #22d3ee35", color: "#0e7490" }}>
+                      ⚡ {sid}
+                    </span>
+                  ))}
+                </div>
+              )}
             </button>
           );
         })}
@@ -1877,7 +1967,8 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, []);
 
-  const [extraOpen, setExtraOpen] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(true);
+  const det = useMonitorDetection();
   const [topicsVisible, setTopicsVisible] = useState(20);
 
   // Wrapper around trigger() that auto-upserts scenario-relevant topics first
@@ -2126,7 +2217,7 @@ export default function Dashboard() {
                   disabled={state.scenarioRunning}
                   onClick={() => handleTrigger(s.id)}
                   className="w-full text-left rounded-xl p-3.5 border transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
-                  style={{ background: "#fff", borderColor: s.color + "28", borderLeftWidth: 3, borderLeftColor: s.color }}
+                  style={{ background: "#fff", borderColor: s.color + "28", borderLeftWidth: 3, borderLeftColor: s.color, ...scenarioRing(s.id, det) }}
                   onMouseEnter={e => { if (!(e.currentTarget as HTMLButtonElement).disabled) { (e.currentTarget as HTMLElement).style.background = s.color + "08"; (e.currentTarget as HTMLElement).style.boxShadow = `0 3px 12px ${s.color}18`; }}}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "#fff"; (e.currentTarget as HTMLElement).style.boxShadow = ""; }}
                 >
@@ -2138,6 +2229,7 @@ export default function Dashboard() {
                       style={{ background: s.color + "15", color: s.color, border: `1px solid ${s.color}35` }}>
                       {s.badge}
                     </span>
+                    <DetBadge id={s.id} det={det} />
                   </div>
                 </button>
               ))}
@@ -2162,7 +2254,7 @@ export default function Dashboard() {
                     disabled={state.scenarioRunning}
                     onClick={() => handleTrigger(s.id)}
                     className="w-full text-left rounded-xl p-3 border transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
-                    style={{ background: "#fff", borderColor: "#dce5ef" }}
+                    style={{ background: "#fff", borderColor: det.detected.has(s.id) ? s.color + "40" : "#dce5ef", ...scenarioRing(s.id, det) }}
                     onMouseEnter={e => { if (!(e.currentTarget as HTMLButtonElement).disabled) { (e.currentTarget.style.borderColor = "#1D9E75"); (e.currentTarget.style.background = "#f0faf6"); }}}
                     onMouseLeave={e => { (e.currentTarget.style.borderColor = "#dce5ef"); (e.currentTarget.style.background = "#fff"); }}
                   >
@@ -2174,6 +2266,7 @@ export default function Dashboard() {
                         style={{ background: s.color + "15", color: s.color, border: `1px solid ${s.color}30` }}>
                         {s.badge}
                       </span>
+                      <DetBadge id={s.id} det={det} />
                     </div>
                   </button>
                 ))}
@@ -2192,6 +2285,7 @@ export default function Dashboard() {
 
           {/* Kafka Topics panel */}
           <TopicsPanel
+            monDet={det}
             topics={topics}
             prevLagRef={prevLagRef}
             onSelect={setSelectedTopic}

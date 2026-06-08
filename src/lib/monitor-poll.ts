@@ -101,6 +101,7 @@ function getPollGlobal() {
         detectedThisCycle: [],
       },
       history: [],
+      recentDetections: [] as Array<{ scenarioId: PollScenarioId; ts: number; confidence: number; gate: string; cause: string }>,
       activeScenarios: new Set(),
     };
   }
@@ -122,13 +123,34 @@ async function collectSnapshot(): Promise<MetricSnapshot> {
     schemaVersionCounts: {},
   };
 
+  // ── ALWAYS read the in-memory broker simulation as baseline ──────────────
+  // Ensures controllerEpoch and consumerGroups reflect scenario trigger state
+  // (lag-spike sets lag=24000, failover increments epoch, etc.) regardless of
+  // KAFKA_MODE — so the polling loop can detect and autonomously re-fire them.
+  try {
+    const meshMod = await import("./mesh");
+    const meshSnap = meshMod.getSnapshot();
+    snap.controllerEpoch = meshSnap.broker.controllerEpoch;
+    snap.brokersOnline   = meshSnap.broker.brokersOnline;
+    for (const [id, cg] of Object.entries(meshSnap.broker.consumerGroups)) {
+      const g = cg as { lag: number; members: number; rebalanceState: string };
+      snap.consumerGroups[id] = {
+        lag:         g.lag,
+        memberCount: g.members,
+        state:       g.rebalanceState,
+      };
+    }
+  } catch (e) {
+    console.warn("[MonitorPoll] Mesh state read error:", (e as Error).message);
+  }
+
   if (rt.mode === "real") {
-    // ── KafkaJS admin (ISR, controller epoch, consumer lag) ─────────────────
+    // ── KafkaJS admin — supplements ISR + real consumer groups ──────────────
     try {
       const { getKafkaAdminMetrics } = await import("./kafka-admin");
       const admin = await getKafkaAdminMetrics();
-      snap.controllerEpoch = admin.controllerEpoch;
-      snap.brokersOnline = admin.brokersOnline;
+      if (admin.controllerEpoch > 0) snap.controllerEpoch = admin.controllerEpoch;
+      if (admin.brokersOnline  > 1) snap.brokersOnline   = admin.brokersOnline;
       snap.underReplicatedPartitions = admin.underReplicatedPartitions;
       for (const [id, cg] of Object.entries(admin.consumerGroups)) {
         snap.consumerGroups[id] = cg;
@@ -137,55 +159,30 @@ async function collectSnapshot(): Promise<MetricSnapshot> {
       console.warn("[MonitorPoll] KafkaAdmin error:", (e as Error).message);
     }
 
-    // ── Aiven REST (disk metrics + topic sizes + consumer group lag from partitions) ──
+    // ── Aiven REST — disk metrics + topic sizes + CG lag from partitions ────
     try {
-      const {
-        getServiceMetrics,
-        getClusterTopicSizes,
-        listTopics,
-        listSchemas,
-      } = await import("./aiven-admin");
+      const { getServiceMetrics, getClusterTopicSizes, listTopics, listSchemas } =
+        await import("./aiven-admin");
 
-      // Disk usage
       const diskMetrics = await getServiceMetrics();
       snap.diskUsedPercent = diskMetrics.diskUsedPercent;
 
-      // Topic sizes + consumer groups from partition responses
       const topics = await listTopics();
       const topicData = await getClusterTopicSizes(topics);
       snap.topicSizeBytes = topicData.topicBytes;
 
-      // Merge Aiven consumer group lag (fills gaps KafkaJS admin couldn't reach)
       for (const [groupId, lag] of Object.entries(topicData.allConsumerGroups)) {
         if (!snap.consumerGroups[groupId]) {
           snap.consumerGroups[groupId] = { lag, memberCount: 1, state: "unknown" };
         } else if (lag > snap.consumerGroups[groupId].lag) {
-          // Use the higher reading as the authoritative one
           snap.consumerGroups[groupId].lag = lag;
         }
       }
 
-      // Schema version counts (for mismatch detection)
       const subjects = await listSchemas();
       snap.schemaVersionCounts = Object.fromEntries(subjects.map((s) => [s, 1]));
     } catch (e) {
       console.warn("[MonitorPoll] Aiven REST error:", (e as Error).message);
-    }
-  } else {
-    // ── MOCK mode: read directly from in-memory broker simulation ────────────
-    // Dynamic import to avoid circular dependency at module load time
-    const { getMeshBrokerSnapshot } = await import("./mesh").then(
-      (m) => ({ getMeshBrokerSnapshot: m.getSnapshot })
-    );
-    const meshSnap = getMeshBrokerSnapshot();
-    snap.controllerEpoch = meshSnap.broker.controllerEpoch;
-    snap.brokersOnline = meshSnap.broker.brokersOnline;
-    for (const [id, cg] of Object.entries(meshSnap.broker.consumerGroups)) {
-      snap.consumerGroups[id] = {
-        lag: cg.lag,
-        memberCount: cg.members,
-        state: cg.rebalanceState,
-      };
     }
   }
 
@@ -608,6 +605,44 @@ const CORE_SCENARIOS = new Set<PollScenarioId>([
   "benign-rebalance",
 ]);
 
+
+// ── Evaluator for extended scenarios signalled via /api/mesh/inject-signal ────
+function evalSignalledScenarios(
+  snap: MetricSnapshot,
+  _history: MetricSnapshot[]
+): TriggerResult[] {
+  // Extended scenarios don't have metric thresholds — they fire when the
+  // inject-signal endpoint marks them on broker.signalledScenarios.
+  // Each signal is valid for 90 seconds after injection.
+  const EXTENDED: Array<{ id: PollScenarioId; gate: "approval" | "auto" | "suppress" }> = [
+    { id: "schema-mismatch",          gate: "approval" },
+    { id: "disk-saturation",          gate: "auto" },
+    { id: "under-replication",        gate: "approval" },
+    { id: "producer-timeout",         gate: "auto" },
+    { id: "consumer-session-timeout", gate: "auto" },
+    { id: "compaction-lag",           gate: "auto" },
+  ];
+  const results: TriggerResult[] = [];
+  try {
+    const meshMod = require("./mesh");
+    const broker = meshMod.getSnapshot()?.broker as Record<string, unknown>;
+    const signals = broker?.signalledScenarios as Record<string, number> | undefined;
+    if (!signals) return results;
+    const now = Date.now();
+    for (const { id, gate } of EXTENDED) {
+      const signalTs = signals[id];
+      if (signalTs && now - signalTs < 90_000) {
+        results.push({
+          scenarioId: id, triggered: true, confidence: 0.90,
+          cause: `Scenario triggered by operator — Monitor detected signal`,
+          gate,
+        });
+      }
+    }
+  } catch { /* mesh not available */ }
+  return results;
+}
+
 // ── Poll cycle ────────────────────────────────────────────────────────────────
 
 async function runPollCycle(): Promise<void> {
@@ -635,12 +670,18 @@ async function runPollCycle(): Promise<void> {
   const historyWindow = history.slice(0, -1); // everything before this snap
   const now = Date.now();
 
-  // Evaluate all conditions
-  for (const evaluator of EVALUATORS) {
-    const result = evaluator(snap, historyWindow);
+  // Evaluate all conditions (including extended signal-based scenarios)
+  const allResults = [
+    ...EVALUATORS.map(e => e(snap, historyWindow)),
+    ...evalSignalledScenarios(snap, historyWindow),
+  ];
+  for (const result of allResults) {
     if (!result.triggered) continue;
 
     state.detectedThisCycle.push(result);
+    // Persist for 2 min so rings stay visible between poll cycles
+    if (!g.recentDetections) g.recentDetections = [];
+    (g.recentDetections as Array<{ scenarioId: PollScenarioId; ts: number; confidence: number; gate: string; cause: string }>).push({ ...result, ts: now });
 
     const { scenarioId, cause, confidence, gate } = result;
 
@@ -685,18 +726,10 @@ async function runPollCycle(): Promise<void> {
     state.cooldowns[scenarioId] = now;
     activeScenarios.add(scenarioId);
 
-    if (CORE_SCENARIOS.has(scenarioId)) {
-      // Full MRAL loop for the 4 core scenarios
-      const { triggerScenario } = await import("./mesh");
-      const res = triggerScenario(
-        scenarioId as "lag-spike" | "controller-failover" | "share-group" | "benign-rebalance"
-      );
-      if (!res.ok) {
-        // Scenario already running externally — extend cooldown and skip
-        state.cooldowns[scenarioId] = now;
-      }
-    } else {
-      // Extended scenarios: emit anomaly notification only (full MRAL TBD)
+    {
+      // MRAL animation is handled by anomaly-sim via auto-trigger-scenario SSE.
+      // Poll loop's role: detection, audit logging, cooldown tracking.
+      // Extended scenarios: emit anomaly notification only
       eventBus.publish({
         type: "audit",
         record: {
@@ -761,7 +794,15 @@ export function getMonitorPollState(): PollLoopState & {
   historyLength: number;
 } {
   const g = getPollGlobal();
-  return { ...g.state, historyLength: g.history.length };
+  const TWO_MIN = 2 * 60_000;
+  const now = Date.now();
+  const recentWindow = ((g.recentDetections ?? []) as Array<{ ts: number } & TriggerResult>)
+    .filter((d) => now - d.ts < TWO_MIN);
+  // Deduplicate: keep latest entry per scenarioId
+  const seen = new Map<string, typeof recentWindow[0]>();
+  for (const d of recentWindow) seen.set(d.scenarioId, d);
+  const deduped = Array.from(seen.values());
+  return { ...g.state, detectedThisCycle: deduped, historyLength: g.history.length };
 }
 
 export function getLatestSnapshot(): MetricSnapshot | null {

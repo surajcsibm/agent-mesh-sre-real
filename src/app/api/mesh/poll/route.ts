@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getMonitorPollState, getLatestSnapshot, startMonitorPolling, stopMonitorPolling } from "@/lib/monitor-poll";
+import { startAnomalySimulation, getAnomalySimState } from "@/lib/anomaly-sim";
 
 export async function GET() {
-  return NextResponse.json({ poll: getMonitorPollState(), latestSnapshot: getLatestSnapshot() });
+  return NextResponse.json({ poll: getMonitorPollState(), latestSnapshot: getLatestSnapshot(), anomalySim: getAnomalySimState() });
 }
 
 export async function POST(req: Request) {

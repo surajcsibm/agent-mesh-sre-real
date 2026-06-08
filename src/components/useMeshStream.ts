@@ -124,6 +124,36 @@ export function useMeshStream() {
             dispatch({ type: "state", payload: ssePayload });
             break;
           }
+          case "auto-trigger-scenario": {
+            // Autonomous Monitor triggered a scenario — run the full client-side MRAL.
+            // runClientScenario handles: animation, approval gates, notifications, email.
+            const sid = (event as { type: "auto-trigger-scenario"; scenarioId: string }).scenarioId;
+            if (sid) runClientScenario(sid as ScenarioKey, dispatch as (a: SimAction) => void);
+            break;
+          }
+          case "auto-topic-heal": {
+            // Monitor detected an unhealthy topic and scheduled autonomous healing.
+            const { topicName, currentStatus, lagTotal, partitions } =
+              event as { type: "auto-topic-heal"; topicName: string; currentStatus: "degraded" | "critical"; lagTotal: number; partitions: number };
+            runTopicHeal({ topicName, currentStatus, lagTotal, partitions }, dispatch as (a: SimAction) => void);
+            break;
+          }
+          case "approval-new": {
+            // Autonomous Monitor trigger raised a policy gate.
+            // Add the approval to state.pendingApprovals so the Dashboard modal shows.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ap = (event as any).payload;
+            if (ap) dispatch({ type: "state", payload: { pendingApprovals: [ap] } });
+            break;
+          }
+          case "approval-update": {
+            // Server resolved the approval (approved or rejected) — clear the modal.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const upd = (event as any).payload;
+            const keep = upd?.status === "pending" ? [upd] : [];
+            dispatch({ type: "state", payload: { pendingApprovals: keep } });
+            break;
+          }
           case "audit":
             dispatch({ type: "audit", record: event.record });
             break;
