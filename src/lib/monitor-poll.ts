@@ -1,0 +1,771 @@
+/**
+ * monitor-poll.ts
+ * Autonomous Monitor Agent polling loop.
+ *
+ * Runs every POLL_MS (30 s) collecting a MetricSnapshot from:
+ *   • Aiven REST API  (disk metrics, topic sizes, consumer group lag from partitions)
+ *   • KafkaJS admin   (ISR, controller epoch, consumer group state)
+ *   • Mesh broker sim (MOCK mode — reads the in-memory broker state directly)
+ *
+ * Maintains a sliding window of WINDOW_SIZE snapshots (≈ 5 min of history).
+ * Evaluates all 11 trigger conditions each cycle. When a condition fires it:
+ *   1. Checks the per-scenario cooldown (COOLDOWN_MS = 5 min)
+ *   2. Checks the deduplication set (no two concurrent runs of the same scenario)
+ *   3. Emits a "monitor-detect" SSE event with cause + confidence
+ *   4. For the 4 core MRAL scenarios, calls triggerScenario() to run the full loop
+ *   5. For extended scenarios 05–11, emits an anomaly audit record (full MRAL TBD)
+ */
+import "server-only";
+import { getRuntime } from "./runtime-mode";
+import { eventBus } from "./event-bus";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type PollScenarioId =
+  | "lag-spike"
+  | "controller-failover"
+  | "share-group"
+  | "benign-rebalance"
+  | "schema-mismatch"
+  | "disk-saturation"
+  | "under-replication"
+  | "producer-timeout"
+  | "consumer-session-timeout"
+  | "compaction-lag"
+  | "partition-imbalance";
+
+export interface MetricSnapshot {
+  ts: number;
+  controllerEpoch: number;
+  brokersOnline: number;
+  /** groupId → metrics */
+  consumerGroups: Record<
+    string,
+    { lag: number; memberCount: number; state: string }
+  >;
+  underReplicatedPartitions: number;
+  /** null = not available (Aiven plan limitation) */
+  diskUsedPercent: number | null;
+  /** topicName → total partition log bytes */
+  topicSizeBytes: Record<string, number>;
+  /** subject → version count (for schema mismatch detection) */
+  schemaVersionCounts: Record<string, number>;
+}
+
+export interface TriggerResult {
+  scenarioId: PollScenarioId;
+  triggered: boolean;
+  confidence: number;
+  cause: string;
+  gate: "approval" | "auto" | "suppress";
+}
+
+export interface PollLoopState {
+  running: boolean;
+  cycleCount: number;
+  lastPollAt: number | null;
+  lastError: string | null;
+  snapshotCount: number;
+  cooldowns: Record<PollScenarioId, number>; // ts of last trigger
+  detectedThisCycle: TriggerResult[];
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const POLL_MS = 30_000;
+const WINDOW_SIZE = 10; // 5 min history
+const COOLDOWN_MS = 5 * 60_000;
+
+// ── Module-level state ────────────────────────────────────────────────────────
+
+declare global {
+  var __monitorPoll: {
+    timer: NodeJS.Timeout | null;
+    state: PollLoopState;
+    history: MetricSnapshot[];
+    activeScenarios: Set<PollScenarioId>;
+  } | undefined;
+}
+
+function getPollGlobal() {
+  if (!globalThis.__monitorPoll) {
+    globalThis.__monitorPoll = {
+      timer: null,
+      state: {
+        running: false,
+        cycleCount: 0,
+        lastPollAt: null,
+        lastError: null,
+        snapshotCount: 0,
+        cooldowns: {} as Record<PollScenarioId, number>,
+        detectedThisCycle: [],
+      },
+      history: [],
+      activeScenarios: new Set(),
+    };
+  }
+  return globalThis.__monitorPoll;
+}
+
+// ── Metric collection ─────────────────────────────────────────────────────────
+
+async function collectSnapshot(): Promise<MetricSnapshot> {
+  const rt = getRuntime();
+  const snap: MetricSnapshot = {
+    ts: Date.now(),
+    controllerEpoch: -1,
+    brokersOnline: 1,
+    consumerGroups: {},
+    underReplicatedPartitions: 0,
+    diskUsedPercent: null,
+    topicSizeBytes: {},
+    schemaVersionCounts: {},
+  };
+
+  if (rt.mode === "real") {
+    // ── KafkaJS admin (ISR, controller epoch, consumer lag) ─────────────────
+    try {
+      const { getKafkaAdminMetrics } = await import("./kafka-admin");
+      const admin = await getKafkaAdminMetrics();
+      snap.controllerEpoch = admin.controllerEpoch;
+      snap.brokersOnline = admin.brokersOnline;
+      snap.underReplicatedPartitions = admin.underReplicatedPartitions;
+      for (const [id, cg] of Object.entries(admin.consumerGroups)) {
+        snap.consumerGroups[id] = cg;
+      }
+    } catch (e) {
+      console.warn("[MonitorPoll] KafkaAdmin error:", (e as Error).message);
+    }
+
+    // ── Aiven REST (disk metrics + topic sizes + consumer group lag from partitions) ──
+    try {
+      const {
+        getServiceMetrics,
+        getClusterTopicSizes,
+        listTopics,
+        listSchemas,
+      } = await import("./aiven-admin");
+
+      // Disk usage
+      const diskMetrics = await getServiceMetrics();
+      snap.diskUsedPercent = diskMetrics.diskUsedPercent;
+
+      // Topic sizes + consumer groups from partition responses
+      const topics = await listTopics();
+      const topicData = await getClusterTopicSizes(topics);
+      snap.topicSizeBytes = topicData.topicBytes;
+
+      // Merge Aiven consumer group lag (fills gaps KafkaJS admin couldn't reach)
+      for (const [groupId, lag] of Object.entries(topicData.allConsumerGroups)) {
+        if (!snap.consumerGroups[groupId]) {
+          snap.consumerGroups[groupId] = { lag, memberCount: 1, state: "unknown" };
+        } else if (lag > snap.consumerGroups[groupId].lag) {
+          // Use the higher reading as the authoritative one
+          snap.consumerGroups[groupId].lag = lag;
+        }
+      }
+
+      // Schema version counts (for mismatch detection)
+      const subjects = await listSchemas();
+      snap.schemaVersionCounts = Object.fromEntries(subjects.map((s) => [s, 1]));
+    } catch (e) {
+      console.warn("[MonitorPoll] Aiven REST error:", (e as Error).message);
+    }
+  } else {
+    // ── MOCK mode: read directly from in-memory broker simulation ────────────
+    // Dynamic import to avoid circular dependency at module load time
+    const { getMeshBrokerSnapshot } = await import("./mesh").then(
+      (m) => ({ getMeshBrokerSnapshot: m.getSnapshot })
+    );
+    const meshSnap = getMeshBrokerSnapshot();
+    snap.controllerEpoch = meshSnap.broker.controllerEpoch;
+    snap.brokersOnline = meshSnap.broker.brokersOnline;
+    for (const [id, cg] of Object.entries(meshSnap.broker.consumerGroups)) {
+      snap.consumerGroups[id] = {
+        lag: cg.lag,
+        memberCount: cg.members,
+        state: cg.rebalanceState,
+      };
+    }
+  }
+
+  return snap;
+}
+
+// ── Trigger condition evaluators ──────────────────────────────────────────────
+
+function evalLagSpike(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "lag-spike",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "approval",
+  };
+  const cg = snap.consumerGroups["payments-consumer"];
+  if (!cg || cg.lag < 5_000) return base;
+
+  if (history.length >= 2) {
+    const prev = history[history.length - 1].consumerGroups["payments-consumer"];
+    const prev2 =
+      history.length >= 3
+        ? history[history.length - 2].consumerGroups["payments-consumer"]
+        : null;
+    const growing = prev && cg.lag > prev.lag;
+    const sustained = prev2 && prev && prev.lag > prev2.lag && cg.lag > prev.lag;
+
+    if (cg.lag > 10_000 && sustained) {
+      const delta = cg.lag - (prev2?.lag ?? 0);
+      return {
+        ...base,
+        triggered: true,
+        confidence: 0.88,
+        cause: `payments-consumer lag ${cg.lag.toLocaleString()} msgs, growing +${delta.toLocaleString()} over 3 samples`,
+      };
+    }
+    if (cg.lag > 20_000 && growing) {
+      return {
+        ...base,
+        triggered: true,
+        confidence: 0.82,
+        cause: `payments-consumer lag ${cg.lag.toLocaleString()} msgs exceeds critical threshold`,
+      };
+    }
+  }
+  // Single sample over hard threshold
+  if (cg.lag > 30_000) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.80,
+      cause: `payments-consumer lag ${cg.lag.toLocaleString()} msgs — hard threshold exceeded`,
+    };
+  }
+  return base;
+}
+
+function evalControllerFailover(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "controller-failover",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "auto",
+  };
+  if (history.length < 1 || snap.controllerEpoch <= 0) return base;
+  const prev = history[history.length - 1];
+  if (prev.controllerEpoch > 0 && snap.controllerEpoch > prev.controllerEpoch) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.97,
+      cause: `KRaft controller epoch ${prev.controllerEpoch} → ${snap.controllerEpoch}`,
+    };
+  }
+  return base;
+}
+
+function evalShareGroup(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "share-group",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "approval",
+  };
+  const sg = snap.consumerGroups["share-group-1"];
+  if (!sg || sg.lag < 5_000) return base;
+
+  const prev = history.length
+    ? history[history.length - 1].consumerGroups["share-group-1"]
+    : null;
+  const growing = !prev || sg.lag >= prev.lag;
+  if (sg.lag > 10_000 && growing) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.84,
+      cause: `share-group-1 queue depth ${sg.lag.toLocaleString()} records, growing`,
+    };
+  }
+  return base;
+}
+
+function evalBenignRebalance(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  // SUPPRESS: rebalance in progress but lag not growing
+  const base: TriggerResult = {
+    scenarioId: "benign-rebalance",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "suppress",
+  };
+  const cg = snap.consumerGroups["payments-consumer"];
+  if (!cg) return base;
+
+  const rebalancing =
+    cg.state === "preparing-rebalance" || cg.state === "rebalancing";
+  if (!rebalancing) return base;
+
+  const prevLag =
+    history.length
+      ? (history[history.length - 1].consumerGroups["payments-consumer"]?.lag ?? cg.lag)
+      : cg.lag;
+  const lagStable = Math.abs(cg.lag - prevLag) < 500;
+
+  if (lagStable && cg.lag < 5_000) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.91,
+      cause: `Rebalance (${cg.state}) with stable lag ${cg.lag} — KIP-848 false positive suppressed`,
+    };
+  }
+  return base;
+}
+
+function evalSchemaMismatch(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "schema-mismatch",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "approval",
+  };
+  if (!history.length) return base;
+  const prev = history[history.length - 1];
+  for (const [subject, count] of Object.entries(snap.schemaVersionCounts)) {
+    const prevCount = prev.schemaVersionCounts[subject] ?? 0;
+    if (count > prevCount + 1) {
+      return {
+        ...base,
+        triggered: true,
+        confidence: 0.78,
+        cause: `Schema subject '${subject}' jumped ${prevCount}→${count} versions in one cycle`,
+      };
+    }
+  }
+  return base;
+}
+
+function evalDiskSaturation(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "disk-saturation",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "auto",
+  };
+
+  if (snap.diskUsedPercent !== null) {
+    if (snap.diskUsedPercent >= 90) {
+      return {
+        ...base,
+        triggered: true,
+        confidence: 0.95,
+        cause: `Disk ${snap.diskUsedPercent.toFixed(1)}% used — critical threshold`,
+      };
+    }
+    if (snap.diskUsedPercent >= 80) {
+      const prevPct = history.length
+        ? (history[history.length - 1].diskUsedPercent ?? 0)
+        : 0;
+
+      if (snap.diskUsedPercent > prevPct) {
+        return {
+          ...base,
+          triggered: true,
+          confidence: 0.82,
+          cause: `Disk ${snap.diskUsedPercent.toFixed(1)}% used (↑ from ${prevPct.toFixed(1)}%) — warning`,
+        };
+      }
+    }
+    return base;
+  }
+
+  // Fallback: estimate disk pressure from topic log sizes
+  const totalBytes = Object.values(snap.topicSizeBytes).reduce((s, v) => s + v, 0);
+  if (totalBytes > 500 * 1024 * 1024) {
+    // > 500 MB of logs — proxy signal on free-tier cluster
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.60,
+      cause: `Topic log total ${(totalBytes / 1024 / 1024).toFixed(0)} MB — disk pressure estimated`,
+    };
+  }
+  return base;
+}
+
+function evalUnderReplication(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "under-replication",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "approval",
+  };
+  if (snap.underReplicatedPartitions <= 0) return base;
+
+  // Require 2 consecutive samples (≥30s sustained) to avoid restart spikes
+  const prevUrp = history.length
+    ? (history[history.length - 1].underReplicatedPartitions ?? 0)
+    : 0;
+  if (prevUrp > 0) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.93,
+      cause: `${snap.underReplicatedPartitions} under-replicated partition(s) sustained ≥ 30s`,
+    };
+  }
+  return base;
+}
+
+function evalProducerTimeout(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "producer-timeout",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "auto",
+  };
+  if (!history.length) return base;
+
+  // Proxy: broker count drops unexpectedly
+  const prevBrokers = history[history.length - 1].brokersOnline;
+  if (snap.brokersOnline < prevBrokers && snap.brokersOnline < 2) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.72,
+      cause: `Broker count ${prevBrokers}→${snap.brokersOnline} — producer timeouts likely`,
+    };
+  }
+
+  // Proxy: offsetHigh for payments topic stalled while consumer lag grows
+  const payBytes = snap.topicSizeBytes["demo.payments.events"] ?? 0;
+  const prevPayBytes =
+    history[history.length - 1].topicSizeBytes["demo.payments.events"] ?? 0;
+  const cgLag =
+    snap.consumerGroups["payments-consumer"]?.lag ?? 0;
+  const prevCgLag =
+    history[history.length - 1].consumerGroups["payments-consumer"]?.lag ?? 0;
+
+  if (payBytes > 0 && payBytes === prevPayBytes && cgLag > prevCgLag + 1_000) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.68,
+      cause: `Topic log stalled (${payBytes} bytes) while consumer lag grew +${cgLag - prevCgLag} — possible producer timeout`,
+    };
+  }
+  return base;
+}
+
+function evalConsumerSessionTimeout(
+  snap: MetricSnapshot,
+  _history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "consumer-session-timeout",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "auto",
+  };
+  for (const [groupId, cg] of Object.entries(snap.consumerGroups)) {
+    const dead = cg.state.toLowerCase() === "dead";
+    if (dead) {
+      return {
+        ...base,
+        triggered: true,
+        confidence: 0.92,
+        cause: `Consumer group '${groupId}' state = Dead (session timeout)`,
+      };
+    }
+  }
+  // Member count drop detection
+  if (_history.length) {
+    const prev = _history[_history.length - 1].consumerGroups;
+    for (const [groupId, cg] of Object.entries(snap.consumerGroups)) {
+      const prevMembers = prev[groupId]?.memberCount ?? cg.memberCount;
+      if (cg.memberCount < prevMembers && cg.memberCount === 0) {
+        return {
+          ...base,
+          triggered: true,
+          confidence: 0.88,
+          cause: `Consumer group '${groupId}' dropped from ${prevMembers}→0 members`,
+        };
+      }
+    }
+  }
+  return base;
+}
+
+function evalCompactionLag(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  const base: TriggerResult = {
+    scenarioId: "compaction-lag",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "auto",
+  };
+  if (history.length < 2) return base;
+
+  const lessonsNow = snap.topicSizeBytes["ops.lessons.v1"] ?? 0;
+  const lessonsPrev2 =
+    history[history.length - 2].topicSizeBytes["ops.lessons.v1"] ?? 0;
+
+  if (lessonsNow > 1024 * 1024 && lessonsNow > lessonsPrev2 * 1.1) {
+    const growthKB = ((lessonsNow - lessonsPrev2) / 1024).toFixed(0);
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.76,
+      cause: `ops.lessons.v1 grew ${growthKB} KB in 2 samples — log compaction lagging`,
+    };
+  }
+  return base;
+}
+
+function evalPartitionImbalance(
+  snap: MetricSnapshot,
+  history: MetricSnapshot[]
+): TriggerResult {
+  // SUPPRESS: detect but do not act (benign after restart)
+  const base: TriggerResult = {
+    scenarioId: "partition-imbalance",
+    triggered: false,
+    confidence: 0,
+    cause: "",
+    gate: "suppress",
+  };
+  if (!history.length) return base;
+  const prev = history[history.length - 1];
+  if (snap.brokersOnline !== prev.brokersOnline && snap.brokersOnline > 1) {
+    return {
+      ...base,
+      triggered: true,
+      confidence: 0.80,
+      cause: `Broker count changed ${prev.brokersOnline}→${snap.brokersOnline} — leader rebalance likely (suppressed)`,
+    };
+  }
+  return base;
+}
+
+// ── All evaluators ────────────────────────────────────────────────────────────
+
+const EVALUATORS: Array<
+  (s: MetricSnapshot, h: MetricSnapshot[]) => TriggerResult
+> = [
+  evalLagSpike,
+  evalControllerFailover,
+  evalShareGroup,
+  evalBenignRebalance,
+  evalSchemaMismatch,
+  evalDiskSaturation,
+  evalUnderReplication,
+  evalProducerTimeout,
+  evalConsumerSessionTimeout,
+  evalCompactionLag,
+  evalPartitionImbalance,
+];
+
+// ── Core MRAL scenarios supported by triggerScenario() ───────────────────────
+
+const CORE_SCENARIOS = new Set<PollScenarioId>([
+  "lag-spike",
+  "controller-failover",
+  "share-group",
+  "benign-rebalance",
+]);
+
+// ── Poll cycle ────────────────────────────────────────────────────────────────
+
+async function runPollCycle(): Promise<void> {
+  const g = getPollGlobal();
+  const { state, history, activeScenarios } = g;
+
+  state.cycleCount++;
+  state.lastPollAt = Date.now();
+  state.detectedThisCycle = [];
+
+  let snap: MetricSnapshot;
+  try {
+    snap = await collectSnapshot();
+  } catch (e) {
+    state.lastError = (e as Error).message;
+    return;
+  }
+
+  // Push to sliding window
+  history.push(snap);
+  if (history.length > WINDOW_SIZE) history.shift();
+  state.snapshotCount = history.length;
+  state.lastError = null;
+
+  const historyWindow = history.slice(0, -1); // everything before this snap
+  const now = Date.now();
+
+  // Evaluate all conditions
+  for (const evaluator of EVALUATORS) {
+    const result = evaluator(snap, historyWindow);
+    if (!result.triggered) continue;
+
+    state.detectedThisCycle.push(result);
+
+    const { scenarioId, cause, confidence, gate } = result;
+
+    // ── Suppress gate: emit audit but no MRAL ─────────────────────────────
+    if (gate === "suppress") {
+      eventBus.publish({
+        type: "audit",
+        record: {
+          id: `poll-${Date.now()}-${scenarioId}`,
+          ts: now,
+          type: "reasoning",
+          agent: "monitor",
+          summary: `[POLL] Suppress — ${cause}`,
+          detail: { scenarioId, confidence, gate, source: "monitor-poll" },
+        },
+      });
+      continue;
+    }
+
+    // ── Cooldown check ─────────────────────────────────────────────────────
+    const lastTriggered = state.cooldowns[scenarioId] ?? 0;
+    if (now - lastTriggered < COOLDOWN_MS) continue;
+
+    // ── Deduplication: skip if this scenario is already running ───────────
+    if (activeScenarios.has(scenarioId)) continue;
+
+    // ── Emit detection SSE event ───────────────────────────────────────────
+    eventBus.publish({
+      type: "audit",
+      record: {
+        id: `poll-${now}-${scenarioId}`,
+        ts: now,
+        type: "consume",
+        agent: "monitor",
+        summary: `[POLL] Autonomous trigger — ${scenarioId} (conf ${(confidence * 100).toFixed(0)}%) — ${cause}`,
+        detail: { scenarioId, confidence, gate, cause, source: "monitor-poll" },
+        topic: "ops.kafka.metrics.v1",
+      },
+    });
+
+    // ── Fire scenario ──────────────────────────────────────────────────────
+    state.cooldowns[scenarioId] = now;
+    activeScenarios.add(scenarioId);
+
+    if (CORE_SCENARIOS.has(scenarioId)) {
+      // Full MRAL loop for the 4 core scenarios
+      const { triggerScenario } = await import("./mesh");
+      const res = triggerScenario(
+        scenarioId as "lag-spike" | "controller-failover" | "share-group" | "benign-rebalance"
+      );
+      if (!res.ok) {
+        // Scenario already running externally — extend cooldown and skip
+        state.cooldowns[scenarioId] = now;
+      }
+    } else {
+      // Extended scenarios: emit anomaly notification only (full MRAL TBD)
+      eventBus.publish({
+        type: "audit",
+        record: {
+          id: `poll-anom-${now}-${scenarioId}`,
+          ts: now,
+          type: "reasoning",
+          agent: "monitor",
+          summary: `[ANOMALY DETECTED] ${scenarioId}: ${cause}`,
+          detail: { scenarioId, confidence, gate, cause, extended: true },
+        },
+      });
+      // Publish a toast
+      eventBus.publish({
+        type: "toast",
+        message: `Monitor detected: ${scenarioId} — ${cause.slice(0, 80)}`,
+        kind: gate === "approval" ? "warning" : "info",
+      });
+    }
+
+    // Remove from active set after a short yield (fire-and-forget scenarios
+    // clean themselves up; for extended scenarios we remove immediately)
+    if (!CORE_SCENARIOS.has(scenarioId)) {
+      activeScenarios.delete(scenarioId);
+    } else {
+      // The core scenario runner will finish asynchronously — remove after timeout
+      setTimeout(() => activeScenarios.delete(scenarioId), 5 * 60_000);
+    }
+  }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export function startMonitorPolling(): void {
+  const g = getPollGlobal();
+  if (g.state.running) return;
+  g.state.running = true;
+
+  // Fire one cycle immediately, then repeat
+  runPollCycle().catch((e) =>
+    console.error("[MonitorPoll] First cycle error:", e)
+  );
+  g.timer = setInterval(() => {
+    runPollCycle().catch((e) =>
+      console.error("[MonitorPoll] Cycle error:", e)
+    );
+  }, POLL_MS);
+
+  console.log("[MonitorPoll] Started — polling every", POLL_MS / 1000, "s");
+}
+
+export function stopMonitorPolling(): void {
+  const g = getPollGlobal();
+  if (g.timer) {
+    clearInterval(g.timer);
+    g.timer = null;
+  }
+  g.state.running = false;
+  console.log("[MonitorPoll] Stopped");
+}
+
+export function getMonitorPollState(): PollLoopState & {
+  historyLength: number;
+} {
+  const g = getPollGlobal();
+  return { ...g.state, historyLength: g.history.length };
+}
+
+export function getLatestSnapshot(): MetricSnapshot | null {
+  const g = getPollGlobal();
+  return g.history.length ? g.history[g.history.length - 1] : null;
+}
+

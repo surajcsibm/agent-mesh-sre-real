@@ -217,3 +217,136 @@ export async function ensureRequiredTopics(): Promise<{
 
   return { created, existing: existing.filter(t => REQUIRED_TOPICS.some(r => r.name === t)), errors };
 }
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADDITIONS — appended to src/lib/aiven-admin.ts
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Service time-series metrics (disk / CPU / memory) ────────────────────────
+// Calls POST /service/{s}/metrics — available on Aiven plans that include
+// metrics integration. Returns null values if the endpoint returns non-200
+// (e.g. free-tier plans without InfluxDB integration).
+
+export async function getServiceMetrics(): Promise<{
+  diskUsedPercent: number | null;
+  cpuUsedPercent: number | null;
+  memUsedPercent: number | null;
+}> {
+  const fallback = { diskUsedPercent: null, cpuUsedPercent: null, memUsedPercent: null };
+  try {
+    const res = await fetch(`${aivenBase()}/metrics`, {
+      method: "POST",
+      headers: aivenHeaders(),
+      body: JSON.stringify({ period: "hour" }),
+      cache: "no-store",
+    });
+    if (!res.ok) return fallback;
+    const data = await res.json();
+
+    // Aiven metrics format: { metrics: [{ metric: "disk_usage", data: [[ts, val], ...] }] }
+    const latest = (name: string): number | null => {
+      const m = (data.metrics as Array<Record<string, unknown>> | undefined)
+        ?.find((m) => m.metric === name);
+      if (!m) return null;
+      const pts = m.data as Array<[number, number]> | undefined;
+      if (!pts?.length) return null;
+      const last = pts[pts.length - 1];
+      return typeof last[1] === "number" ? Math.round(last[1] * 100) / 100 : null;
+    };
+
+    return {
+      diskUsedPercent: latest("disk_usage"),
+      cpuUsedPercent: latest("cpu_usage"),
+      memUsedPercent: latest("mem_usage"),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+// ── Topic partition details: log sizes + consumer group lag ─────────────────
+// The Aiven /topic/{name} response includes per-partition sizes and any
+// consumer group offsets committed against that topic's partitions.
+
+export async function getTopicSizeAndConsumerGroups(topicName: string): Promise<{
+  totalSizeBytes: number;
+  partitions: Array<{
+    id: number;
+    sizeBytes: number;
+    latestOffset: number;
+    earliestOffset: number;
+  }>;
+  /** Aggregated consumer group lag (sum across all partitions of this topic). */
+  consumerGroups: Array<{ groupId: string; lag: number }>;
+}> {
+  const res = await fetch(
+    `${aivenBase()}/topic/${encodeURIComponent(topicName)}`,
+    { headers: aivenHeaders(), cache: "no-store" }
+  );
+  if (!res.ok) {
+    throw new Error(
+      `Aiven getTopicSizeAndConsumerGroups failed: ${res.status} ${topicName}`
+    );
+  }
+  const data = await res.json();
+  const t = (data.topic ?? {}) as Record<string, unknown>;
+  const rawParts = (t.partitions ?? []) as Array<Record<string, unknown>>;
+
+  // Aggregate CG lag across partitions
+  const cgLagMap: Record<string, number> = {};
+  const parsedParts = rawParts.map((p) => {
+    const cgs = (p.consumer_groups ?? []) as Array<Record<string, unknown>>;
+    for (const cg of cgs) {
+      const id = String(cg.group_id ?? "");
+      if (id) {
+        cgLagMap[id] = (cgLagMap[id] ?? 0) + Number(cg.offset_lag ?? 0);
+      }
+    }
+    return {
+      id: Number(p.partition ?? 0),
+      sizeBytes: Number(p.size ?? 0),
+      latestOffset: Number(p.latest_offset ?? 0),
+      earliestOffset: Number(p.earliest_offset ?? 0),
+    };
+  });
+
+  const totalSizeBytes = parsedParts.reduce((s, p) => s + p.sizeBytes, 0);
+  const consumerGroups = Object.entries(cgLagMap).map(([groupId, lag]) => ({
+    groupId,
+    lag,
+  }));
+
+  return { totalSizeBytes, partitions: parsedParts, consumerGroups };
+}
+
+// ── Cluster-wide topic size + consumer group lag aggregator ──────────────────
+// Fans out getTopicSizeAndConsumerGroups across all topic names concurrently.
+// Used by monitor-poll.ts for disk-pressure estimation and CG lag collection.
+
+export async function getClusterTopicSizes(topicNames: string[]): Promise<{
+  topicBytes: Record<string, number>;
+  totalBytes: number;
+  /** groupId → total lag across all topics */
+  allConsumerGroups: Record<string, number>;
+}> {
+  const topicBytes: Record<string, number> = {};
+  const allConsumerGroups: Record<string, number> = {};
+
+  await Promise.allSettled(
+    topicNames.map(async (name) => {
+      try {
+        const d = await getTopicSizeAndConsumerGroups(name);
+        topicBytes[name] = d.totalSizeBytes;
+        for (const cg of d.consumerGroups) {
+          allConsumerGroups[cg.groupId] =
+            (allConsumerGroups[cg.groupId] ?? 0) + cg.lag;
+        }
+      } catch {
+        topicBytes[name] = 0;
+      }
+    })
+  );
+
+  const totalBytes = Object.values(topicBytes).reduce((s, v) => s + v, 0);
+  return { topicBytes, totalBytes, allConsumerGroups };
+}
+

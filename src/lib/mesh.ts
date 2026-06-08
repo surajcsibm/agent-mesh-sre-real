@@ -118,6 +118,7 @@ interface MeshState {
   notifications: NotificationRecord[];
   incidentQueue: unknown[];
   scenarioRunning: boolean;
+  activeScenarios: Set<string>;
   globalMralPhase: MralPhase;
   approvalResolvers: Map<string, (decision: "approve" | "reject") => void>;
 }
@@ -129,7 +130,7 @@ function getMeshState(): MeshState {
     globalThis.__agentMeshState = {
       agents: makeInitialAgents(), broker: makeInitialBroker(),
       pendingApprovals: [], auditLog: [], lessons: [], notifications: [],
-      incidentQueue: [], scenarioRunning: false, globalMralPhase: "idle",
+      incidentQueue: [], scenarioRunning: false, activeScenarios: new Set(), globalMralPhase: "idle",
       approvalResolvers: new Map(),
     };
   }
@@ -500,6 +501,7 @@ import("./event-bus").then(({ getEventBus }) =>
   const lesson = await runLearn("lag-spike", "scale-consumers", true, 24000, 1200);
   await runNotification("lag-spike", "scale-consumers", 24000, 1200, approval.approvedBy, reasoning, action, lesson);
   s.scenarioRunning = false;
+  s.activeScenarios.delete("lag-spike");
 }
 
 async function runControllerFailover() {
@@ -569,6 +571,7 @@ async function runControllerFailover() {
   const lesson = await runLearn("controller-failover", "controller-failover-ack", true);
   await runNotification("controller-failover", "controller-failover-ack", undefined, undefined, undefined, reasoning, action, lesson);
   s.scenarioRunning = false;
+  s.activeScenarios.delete("controller-failover");
 }
 
 async function runShareGroup() {
@@ -664,6 +667,7 @@ async function runShareGroup() {
   const lesson = await runLearn("share-group", "share-group-rebalance-ack", true, 18000, 2000);
   await runNotification("share-group", "share-group-rebalance-ack", 18000, 2000, approval.approvedBy, reasoning, action, lesson);
   s.scenarioRunning = false;
+  s.activeScenarios.delete("share-group");
 }
 
 async function runBenignRebalance() {
@@ -736,13 +740,15 @@ async function runBenignRebalance() {
   const lesson = await runLearn("benign-rebalance", "rebalance-wait", true, 16000, 0);
   await runNotification("benign-rebalance", "rebalance-wait", 16000, 0, undefined, reasoning, action, lesson);
   s.scenarioRunning = false;
+  s.activeScenarios.delete("benign-rebalance");
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function triggerScenario(id: "lag-spike" | "controller-failover" | "share-group" | "benign-rebalance") {
   const s = getMeshState();
-  if (s.scenarioRunning) return { ok: false, reason: "scenario_already_running" };
+  if (s.activeScenarios.has(id)) return { ok: false, reason: "scenario_already_running" };
+  s.activeScenarios.add(id);
   switch (id) {
     case "lag-spike":           runLagSpike().catch(console.error); break;
     case "controller-failover": runControllerFailover().catch(console.error); break;

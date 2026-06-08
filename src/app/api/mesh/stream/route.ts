@@ -1,9 +1,12 @@
 // SSE stream — clients connect here and receive real-time mesh events
 import { eventBus } from "@/lib/event-bus";
 import { getSnapshot } from "@/lib/mesh";
+import { startMonitorPolling } from "@/lib/monitor-poll";
 
 export const dynamic    = "force-dynamic";
 export const maxDuration = 60; // Vercel: keep the serverless function alive for SSE
+
+startMonitorPolling();
 
 export async function GET() {
   const encoder = new TextEncoder();
