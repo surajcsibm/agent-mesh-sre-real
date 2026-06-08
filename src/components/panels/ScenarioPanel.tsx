@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Activity,
+  Eye,
   AlertTriangle,
   CircuitBoard,
   Layers,
@@ -164,6 +165,7 @@ export function ScenarioPanel() {
 
   return (
     <div className="space-y-4">
+      <MonitorStatusCard />
       <div>
         <div className="flex items-center justify-between mb-2 px-0.5">
           <div className="text-[10.5px] uppercase tracking-wider font-mono text-fg-dim">Run a scenario</div>
@@ -301,3 +303,74 @@ function AgentLifecycle() {
     </div>
   );
 }
+
+
+// ── Autonomous monitor status card ────────────────────────────────────────────
+function MonitorStatusCard() {
+  const [poll, setPoll] = useState<{
+    running: boolean; cycleCount: number; lastPollAt: number | null; lastError: string | null;
+    detectedThisCycle: Array<{ scenarioId: string; confidence: number; gate: string; cause: string }>;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const res = await fetch("/api/mesh/poll");
+        if (res.ok && alive) setPoll((await res.json()).poll);
+      } catch { /* not available yet */ }
+    };
+    refresh();
+    const iv = setInterval(refresh, 5_000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
+  const c = poll?.running ? "#22d3ee" : "#94a3b8";
+  const gateColor = (gate: string) =>
+    gate === "suppress" ? "#a78bfa" : gate === "approval" ? "#fbbf24" : "#34d399";
+  const ago = poll?.lastPollAt
+    ? `${Math.round((Date.now() - poll.lastPollAt) / 1000)}s ago`
+    : "—";
+
+  return (
+    <div className="rounded-xl border p-3 mb-3" style={{ borderColor: `${c}35`, background: `${c}08` }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={poll?.running ? "agent-pulse rounded-full block shrink-0" : "shrink-0"}
+          style={{ width: 7, height: 7, background: c, borderRadius: "50%", boxShadow: poll?.running ? `0 0 8px ${c}` : "none" }} />
+        <span className="text-[11px] uppercase tracking-wider font-mono" style={{ color: c }}>
+          Autonomous Monitor
+        </span>
+        <span className="ml-auto text-[10px] font-mono text-fg-dim">
+          {poll ? (poll.running ? `cycle ${poll.cycleCount} · ${ago}` : "idle") : "connecting…"}
+        </span>
+      </div>
+
+      {poll?.detectedThisCycle?.length ? (
+        <div className="space-y-1">
+          {poll.detectedThisCycle.map((d, i) => (
+            <div key={i} className="text-[11px] leading-snug flex items-start gap-1.5">
+              <span className="shrink-0 font-bold" style={{ color: gateColor(d.gate) }}>
+                {d.gate === "suppress" ? "⊘" : "⚡"}
+              </span>
+              <span className="font-medium text-fg-base">{d.scenarioId}</span>
+              <span className="text-fg-dim ml-auto shrink-0">
+                {(d.confidence * 100).toFixed(0)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[11px] text-fg-dim">
+          {poll?.running ? "No anomalies in last cycle — cluster healthy" : "Start the app to begin monitoring"}
+        </div>
+      )}
+
+      {poll?.lastError && (
+        <div className="mt-1.5 text-[10.5px] text-rose-400 font-mono truncate" title={poll.lastError}>
+          ⚠ {poll.lastError.slice(0, 60)}
+        </div>
+      )}
+    </div>
+  );
+}
+

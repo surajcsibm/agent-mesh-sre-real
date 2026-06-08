@@ -36,6 +36,7 @@ const SCENARIOS = [...PINNED_SCENARIOS, ...EXTRA_SCENARIOS];
 
 // ── Semantic colour maps ──────────────────────────────────────────────────────
 
+const POLL_COLOR = "#0e7490";
 const AUDIT_COLOR: Record<string, string> = {
   publish:          "#2563eb",
   consume:          "#16a34a",
@@ -604,15 +605,15 @@ function AuditLogPanel({ log }: { log: AuditRecord[] }) {
         {[...log].reverse().map((r) => (
           <div key={r.id}
             className="rounded-xl bg-white border border-[#e8eef4] px-3 py-3"
-            style={{ borderLeftWidth: 3, borderLeftColor: AUDIT_COLOR[r.type] ?? "#94a3b8" }}>
+            style={{ borderLeftWidth: 3, borderLeftColor: r.summary?.startsWith("[POLL]") ? POLL_COLOR : (AUDIT_COLOR[r.type] ?? "#94a3b8") }}>
             <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
               <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
                 style={{
-                  background: (AUDIT_COLOR[r.type] ?? "#94a3b8") + "18",
-                  color:       AUDIT_COLOR[r.type] ?? "#94a3b8",
-                  border:     `1px solid ${(AUDIT_COLOR[r.type] ?? "#94a3b8")}30`,
+                  background: (r.summary?.startsWith("[POLL]") ? POLL_COLOR : (AUDIT_COLOR[r.type] ?? "#94a3b8")) + "18",
+                  color: r.summary?.startsWith("[POLL]") ? POLL_COLOR : (AUDIT_COLOR[r.type] ?? "#94a3b8"),
+                  border: `1px solid ${(r.summary?.startsWith("[POLL]") ? POLL_COLOR : (AUDIT_COLOR[r.type] ?? "#94a3b8"))}30`,
                 }}>
-                {r.type}
+                {r.summary?.startsWith("[POLL]") ? "autopoll" : r.type}
               </span>
               <span className="text-[11px] font-semibold text-[#94a3b8] shrink-0">[{r.agent}]</span>
             </div>

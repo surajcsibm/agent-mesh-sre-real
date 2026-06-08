@@ -1,8 +1,10 @@
 "use client";
+import * as React from "react";
 
 import Link from "next/link";
 import {
   Activity,
+  Eye,
   Boxes,
   CircuitBoard,
   Cpu,
@@ -196,6 +198,7 @@ function DirectKafkaStrip({
       <Pill icon={<KeyRound size={11} />} label="Auth" value={kafka.username ?? "avnadmin"} tone="ok" />
       <Pill icon={<ShieldCheck size={11} />} label="CA cert" value={kafka.hasCaCert ? "✓" : "✗"} tone={kafka.hasCaCert ? "ok" : "warn"} />
       <Pill icon={<Activity size={11} />} label="Audit" value={`${audit} writes`} tone="info" />
+      <MonitorPollPill />
     </>
   );
 }
@@ -226,6 +229,7 @@ function MockStrip({
       <Pill icon={<KeyRound size={11} />} label="SASL/SCRAM" value={sim.security.saslScram ? "on" : "off"} tone={sim.security.saslScram ? "ok" : "warn"} />
       <Pill icon={<ShieldCheck size={11} />} label="ACLs" value={String(sim.security.aclsActive)} tone="ok" />
       <Pill icon={<Activity size={11} />} label="Audit" value={`${audit} writes`} tone="info" />
+      <MonitorPollPill />
     </>
   );
 }
@@ -257,3 +261,55 @@ function Pill({
     </div>
   );
 }
+
+
+// ── Monitor polling status pill ───────────────────────────────────────────────
+function MonitorPollPill() {
+  const [poll, setPoll] = React.useState<{
+    running: boolean; cycleCount: number; lastPollAt: number | null;
+    detectedThisCycle: Array<{ scenarioId: string; gate: string }>;
+  } | null>(null);
+
+  React.useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const res = await fetch("/api/mesh/poll");
+        if (res.ok && alive) setPoll((await res.json()).poll);
+      } catch { /* polling endpoint not yet available */ }
+    };
+    refresh();
+    const iv = setInterval(refresh, 5_000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+
+  if (!poll) return null;
+  const hasDetections = (poll.detectedThisCycle?.length ?? 0) > 0;
+  const c = poll.running ? (hasDetections ? "#fbbf24" : "#22d3ee") : "#94a3b8";
+  const label = poll.running
+    ? hasDetections
+      ? `${poll.detectedThisCycle.length} detected`
+      : `cycle ${poll.cycleCount}`
+    : "idle";
+  const ago = poll.lastPollAt
+    ? `${Math.round((Date.now() - poll.lastPollAt) / 1000)}s ago`
+    : "pending";
+
+  return (
+    <div
+      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] font-mono whitespace-nowrap"
+      style={{ background: `${c}15`, border: `1px solid ${c}35` }}
+      title={`Monitor polling loop · last poll ${ago}`}
+    >
+      <span style={{ color: c, display: "flex" }}>
+        {poll.running
+          ? <span className="agent-pulse rounded-full block" style={{ width: 7, height: 7, background: c, boxShadow: `0 0 8px ${c}` }} />
+          : <Eye size={11} />
+        }
+      </span>
+      <span className="text-fg-dim uppercase tracking-wider">Monitor</span>
+      <span className="font-semibold" style={{ color: c }}>{label}</span>
+    </div>
+  );
+}
+
