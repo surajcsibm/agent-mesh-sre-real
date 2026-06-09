@@ -538,25 +538,7 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             </div>
           </div>
 
-          {/* ── Notifications ── */}
-          <div style={{ marginTop: 18 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
-                          letterSpacing: "0.8px", marginBottom: 8 }}>🔔 Notifications</div>
-            {isRejected ? (
-              <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8,
-                            padding: "10px 14px", fontSize: 13, color: "#991b1b" }}>
-                🚫 No notifications sent — action was rejected. No Slack message or ITSM ticket created.
-              </div>
-            ) : (
-              <div style={{ background: "#fefce8", border: "1px solid #fde68a", borderRadius: 8,
-                            padding: "10px 14px", fontSize: 13, color: "#92400e" }}>
-                {data.slackMessage && <div>💬 <strong>Slack</strong> #sre-alerts: {data.slackMessage}</div>}
-                {data.itsmTicket  && <div style={{ marginTop: 5 }}>🎫 <strong>ITSM</strong>: {data.itsmTicket}</div>}
-              </div>
-            )}
-          </div>
-
-          {/* ── Live Events Timeline ── */}
+          {/* ── Notifications — removed; review via Scenario History bar ── */}{/* ── Live Events Timeline ── */}
           {data.liveEvents && data.liveEvents.length > 0 && (
             <div style={{ marginTop: 18 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
@@ -2519,23 +2501,9 @@ export default function Dashboard() {
       {/* Overlays */}
       {console.log("[Dashboard] pendingApprovals:", state.pendingApprovals)}
       <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} />
-      {state.emailSummary && (
-        <ScenarioEndModal
-          data={
-            state.emailSummary.liveEvents && state.emailSummary.liveEvents.length > 0
-              ? state.emailSummary
-              : {
-                  ...state.emailSummary,
-                  liveEvents: state.auditLog.slice(-40).map(r => ({
-                    type: r.type, agent: r.agent, summary: r.summary, ts: r.ts,
-                  })),
-                }
-          }
-          onClose={dismissEmailSummary}
-        />
-      )}
+      { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} />
+{/* ScenarioEndModal removed */}
       )}
       {selectedTopic && !pendingDelete && (
         <TopicModal

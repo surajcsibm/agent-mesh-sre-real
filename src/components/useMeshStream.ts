@@ -60,6 +60,8 @@ function reducer(state: MeshClientState, action: Action): MeshClientState {
       // Preserve existing pendingApprovals if SSE payload doesn't include them
       pendingApprovals: action.payload.pendingApprovals ?? state.pendingApprovals,
     };
+    case "add_pending_approval":
+      return { ...state, pendingApprovals: [...(state.pendingApprovals || []), (action as { type: string; payload: unknown }).payload as import("@/lib/types").ApprovalRequest] };
     case "audit": return { ...state, auditLog: [...state.auditLog.slice(-199), action.record] };
     case "toast": return { ...state, toasts: [...state.toasts, { id: action.id, message: action.message, kind: action.kind }] };
     case "dismissToast": return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) };
@@ -154,7 +156,9 @@ export function useMeshStream() {
             dispatch({ type: "state", payload: { pendingApprovals: keep } });
             break;
           }
-          case "audit":
+          case "add_pending_approval":
+      return { ...state, pendingApprovals: [...(state.pendingApprovals || []), (action as { type: string; payload: unknown }).payload as import("@/lib/types").ApprovalRequest] };
+    case "audit":
             dispatch({ type: "audit", record: event.record });
             break;
           case "toast": {
@@ -199,7 +203,7 @@ export function useMeshStream() {
   const approve = async (id: string, decision: "approve" | "reject") => {
     // Route the decision into the client-side simulation immediately so the
     // scenario branches on approve vs reject without waiting for the server.
-    resolvePendingApproval(decision === "approve");
+    resolvePendingApproval(id, decision === "approve");
     // Also notify the server (no-op on Vercel serverless, but keeps real-mode in sync).
     fetch("/api/mesh/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, decision }) }).catch(() => {});
   };
