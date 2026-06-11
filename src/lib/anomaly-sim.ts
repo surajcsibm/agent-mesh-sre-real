@@ -170,8 +170,13 @@ function getSim() {
 // ── Cycle ─────────────────────────────────────────────────────────────────────
 
 const HEAL_DELAY  = 90_000;
-const MIN_INTERVAL = 90_000;
-const MAX_INTERVAL = 150_000;
+// On Vercel, SSE connections last max 60s — use shorter intervals so all
+// scenarios cycle through across multiple SSE windows. On localhost use
+// realistic longer spacing.
+const IS_VERCEL = process.env.VERCEL === '1';
+const FIRST_DELAY  = IS_VERCEL ?  8_000 : 35_000;
+const MIN_INTERVAL = IS_VERCEL ? 15_000 : 90_000;
+const MAX_INTERVAL = IS_VERCEL ? 25_000 : 150_000;
 const rand = () => MIN_INTERVAL + Math.floor(Math.random() * (MAX_INTERVAL - MIN_INTERVAL));
 
 function runCycle() {
@@ -239,7 +244,8 @@ export function startAnomalySimulation(): void {
   const sim = getSim();
   if (sim.running) return;
   sim.running = true;
-  sim.timer = setTimeout(runCycle, 35_000); // first anomaly after 35s (poll loop gets baseline)
+  sim.nextIndex = Math.floor(Math.random() * ANOMALIES.length);
+  sim.timer = setTimeout(runCycle, FIRST_DELAY); // first anomaly after 35s (poll loop gets baseline)
   console.log("[AnomalySim] Started — first anomaly in 35s, then every 90–150s");
 }
 

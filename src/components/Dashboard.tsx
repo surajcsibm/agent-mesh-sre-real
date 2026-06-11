@@ -1654,11 +1654,13 @@ function ScenarioHistoryBar({ history, onView }: {
               {/* Status badge */}
               <span style={{
                 fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, flexShrink: 0,
-                background: approved ? "#dcfce7" : "#fef2f2",
-                color: approved ? "#16a34a" : "#dc2626",
-                border: `1px solid ${approved ? "#86efac" : "#fca5a5"}`,
+                background: (h as { status?: string }).status === "awaiting-approval" ? "#fef3c7" : approved ? "#dcfce7" : "#fef2f2",
+                color: (h as { status?: string }).status === "awaiting-approval" ? "#92400e" : approved ? "#16a34a" : "#dc2626",
+                border: `1px solid ${(h as { status?: string }).status === "awaiting-approval" ? "#fcd34d" : approved ? "#86efac" : "#fca5a5"}`,
               }}>
-                {approved ? "✓ Resolved" : "✗ Rejected"}
+                {(h as { status?: string }).status === "awaiting-approval"
+                  ? "⏳ Awaiting Approval"
+                  : approved ? "✓ Resolved" : "✗ Rejected"}
               </span>
 
               {/* Chevron */}

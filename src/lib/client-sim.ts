@@ -90,6 +90,7 @@ interface SimStatePayload {
 // useMeshStream calls resolvePendingApproval() when the user clicks Approve/Reject.
 
 const _pendingApprovalCallbacks = new Map<string, (approved: boolean) => void>();
+const _globalPendingApprovals: ApprovalRequest[] = [];
 
 /** Called by useMeshStream's approve() so the sim can branch on the decision. */
 export function resolvePendingApproval(approvalId: string, approved: boolean) {
@@ -329,12 +330,27 @@ function runLagSpike(dispatch: DispatchFn): () => void {
     });
     dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(4200), incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.scaleConsumers (policy-gated, human-in-the-loop)", "approval") });
-    dispatch({ type: "add_pending_approval" as never, payload: approval });
+    // Add to history immediately as "awaiting approval"
+    dispatch({ type: "emailSummary", data: {
+      scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      scenarioId: approval.scenarioId ?? "unknown",
+      action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
+      lagBefore: 0, lagAfter: 0,
+      approved: false, sent: false,
+      status: "awaiting-approval",
+      completedAt: Date.now(),
+    } });
+    _globalPendingApprovals.push(approval);
+    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
     evt("approval", "monitor", "Awaiting approval: kafka.scaleConsumers(payments-consumer, +2 replicas)");
     toast(dispatch, "⏳ Approval required: kafka.scaleConsumers — check the approval panel", "warning");
 
     // Register callback — will fire when user clicks Approve or Reject
     _pendingApprovalCallbacks.set(approval.id, (approved: boolean) => {
+      // Remove from pending display when resolved
+      const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
+      if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
+      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
       if (approved) {
         // ── APPROVED PATH ──────────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
@@ -544,10 +560,25 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
     console.log("[client-sim] dispatching share-group approval gate", approval);
     dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(600), incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.checkpointShareGroup (policy-gated, human-in-the-loop)", "approval") });
-    dispatch({ type: "add_pending_approval" as never, payload: approval });
+    // Add to history immediately as "awaiting approval"
+    dispatch({ type: "emailSummary", data: {
+      scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      scenarioId: approval.scenarioId ?? "unknown",
+      action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
+      lagBefore: 0, lagAfter: 0,
+      approved: false, sent: false,
+      status: "awaiting-approval",
+      completedAt: Date.now(),
+    } });
+    _globalPendingApprovals.push(approval);
+    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
     toast(dispatch, "⏳ Approval required: kafka.checkpointShareGroup — check the approval panel", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved: boolean) => {
+      // Remove from pending display when resolved
+      const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
+      if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
+      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
       if (approved) {
         // ── APPROVED PATH ──────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
@@ -778,10 +809,25 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
     agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting" });
     dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(LAG), incidentQueueDepth: 2 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.updateSchemaCompatibility (schema mutation is policy-gated)", "approval") });
-    dispatch({ type: "add_pending_approval" as never, payload: approval });
+    // Add to history immediately as "awaiting approval"
+    dispatch({ type: "emailSummary", data: {
+      scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      scenarioId: approval.scenarioId ?? "unknown",
+      action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
+      lagBefore: 0, lagAfter: 0,
+      approved: false, sent: false,
+      status: "awaiting-approval",
+      completedAt: Date.now(),
+    } });
+    _globalPendingApprovals.push(approval);
+    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
     toast(dispatch, "⏳ Schema update approval required", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved) => {
+      // Remove from pending display when resolved
+      const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
+      if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
+      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
       if (approved) {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
@@ -957,10 +1003,25 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
     agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting" });
     dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(LAG), incidentQueueDepth: 3 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.reassignPartitions — partition mutation requires operator sign-off", "approval") });
-    dispatch({ type: "add_pending_approval" as never, payload: approval });
+    // Add to history immediately as "awaiting approval"
+    dispatch({ type: "emailSummary", data: {
+      scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      scenarioId: approval.scenarioId ?? "unknown",
+      action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
+      lagBefore: 0, lagAfter: 0,
+      approved: false, sent: false,
+      status: "awaiting-approval",
+      completedAt: Date.now(),
+    } });
+    _globalPendingApprovals.push(approval);
+    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
     toast(dispatch, "⏳ Partition reassignment approval required", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved) => {
+      // Remove from pending display when resolved
+      const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
+      if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
+      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
       if (approved) {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
@@ -1457,7 +1518,9 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
       };
       agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting" });
       dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
-      dispatch({ type: "add_pending_approval" as never, payload: { id: approvalId, toolCall, reason: rootCause, ts: Date.now() } });
+      const _approvalObj = { id: approvalId, toolCall, reason: rootCause, ts: Date.now() };
+      _globalPendingApprovals.push(_approvalObj as ApprovalRequest);
+      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
       dispatch({ type: "audit", record: auditRec("monitor", `Approval gate: restart consumer group + scale replicas on ${topicName}. Awaiting operator sign-off.`, "approval") });
       toast(dispatch, `🔐 Approval required — healing ${topicName}`, "warning");
 
