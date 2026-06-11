@@ -316,7 +316,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
     };
     agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting",
       lastReasoning: {
-        rootCause: "payments-consumer lag spike: 4,200 messages behind across 3 partitions",
+        rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
         confidence: 0.94,
         kafkaFeatureCited: "KIP-848 Share Groups",
         rebalanceState: "Rebalancing",
@@ -324,7 +324,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
         crossCorrelation: { brokers: "healthy", jvmHeap: "68%", networkInRate: "↑ 2.1×", rebalanceInProgress: true },
         recommendedAction: "kafka.scaleConsumers(group=payments-consumer, delta=2)",
         requiresApproval: true,
-        rationale: "Lag growth rate 420 msg/s exceeds SLO threshold (150 msg/s). Rebalance in progress adds risk; adding 2 consumers will absorb spike within ~10s.",
+        rationale: "Lag growth rate 420 msg/s exceeds SLO (150 msg/s). Root cause: downstream DB bottleneck stalling consumer threads during active KIP-848 rebalance. Partition count (3) is below the consumer group size, creating hotspots. Adding 2 consumers will absorb the spike within ~10s.",
         lessonsCited: ["lesson-003"],
       }
     });
@@ -394,9 +394,9 @@ function runLagSpike(dispatch: DispatchFn): () => void {
             approvedBy: "operator",
             approved: true,
             reasoning: {
-              rootCause: "payments-consumer lag spike: 4,200 messages behind across 3 partitions",
+              rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
               confidence: 0.94, kafkaFeature: "KIP-848 Share Groups",
-              rationale: "Lag growth rate 420 msg/s exceeded SLO threshold (150 msg/s). Adding 2 consumers resolved lag in ~10s.",
+              rationale: "Lag growth 420 msg/s exceeded SLO. Downstream DB bottleneck stalled consumer threads; insufficient partition count created hotspots. Added 2 consumers — lag drained in ~10s.",
               lessonsCited: ["lesson-003"],
             },
             lesson: { notes: "Scale-out resolved lag in 9s. Threshold tightened 300→150 msg/s.", adjustedThreshold: 150 },
@@ -433,9 +433,9 @@ function runLagSpike(dispatch: DispatchFn): () => void {
           approvedBy: "operator",
           approved: false,
           reasoning: {
-            rootCause: "payments-consumer lag spike: 4,200 messages behind across 3 partitions",
+            rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
             confidence: 0.94, kafkaFeature: "KIP-848 Share Groups",
-            rationale: "Lag growth rate 420 msg/s exceeded SLO threshold (150 msg/s). Action was rejected by operator — no cluster changes made.",
+            rationale: "Lag growth 420 msg/s exceeded SLO (150 msg/s). Cause: broker rebalance mid-consumption paused processing. Operator rejected scale action — no cluster changes made.",
             lessonsCited: ["lesson-003"],
           },
           liveEvents: [...liveEvents],
@@ -489,9 +489,9 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
       sendEmail(dispatch, "controller-failover", "KRaft Controller Failover", 0, 0, "kafka.ackControllerFailover", {
         approvedBy: "system",
         reasoning: {
-          rootCause: "KRaft controller leadership transferred: broker-1 → broker-2 (epoch 14→15)",
+          rootCause: "KRaft controller epoch incremented: broker-1 → broker-2 (epoch 14→15) — active controller process became unresponsive",
           confidence: 0.99, kafkaFeature: "KRaft Consensus Protocol",
-          rationale: "Election completed in 220ms. No partition reassignment required. Cluster healthy.",
+          rationale: "Controller failover detected via epoch change. Possible causes: controller JVM OOM, network partition isolating quorum voters, or planned rolling restart. Election completed in 220ms — no partition reassignment required. Cluster healthy.",
         },
         lesson: { notes: "KRaft failover handled automatically. No consumer impact. Election latency within SLO." },
         slackMessage: "ℹ️ KRaft controller failover epoch 14→15 acknowledged — cluster healthy",
@@ -545,7 +545,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
     agents = patch(agents, "monitor", {
       status: "awaiting-approval", mralPhase: "awaiting",
       lastReasoning: {
-        rootCause: "KIP-932 share group rebalance on payments-share-group: 600 messages behind",
+        rootCause: "KIP-932 share group rebalance on payments-share-group: 600 messages behind — consumer heartbeat deadline missed",
         confidence: 0.91,
         kafkaFeatureCited: "KIP-932 Share Groups",
         rebalanceState: "Rebalancing",
@@ -553,7 +553,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
         crossCorrelation: { brokers: "healthy", jvmHeap: "62%", networkInRate: "↑ 1.4×", rebalanceInProgress: true },
         recommendedAction: "kafka.checkpointShareGroup(shareGroupId=payments-share-group)",
         requiresApproval: true,
-        rationale: "Share group rebalance triggered by consumer join. Checkpointing offsets prevents duplicate delivery during transition.",
+        rationale: "Share group rebalance triggered — consumer missed heartbeat deadline causing group coordinator timeout. Queue depth exceeded configured fetch limit. Checkpointing offsets before reassignment prevents duplicate delivery. Broker partition leadership shift may have invalidated existing assignments.",
         lessonsCited: [],
       },
     });
@@ -607,7 +607,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
             reasoning: {
               rootCause: "KIP-932 share group rebalance detected on payments-share-group (600 msgs behind)",
               confidence: 0.91, kafkaFeature: "KIP-932 Share Groups",
-              rationale: "Share group rebalance triggered by consumer join. Checkpointing offsets prevents duplicate delivery.",
+              rationale: "Consumer heartbeat deadline missed, triggering group coordinator timeout. Share group queue depth exceeded fetch limit. Offset checkpoint applied — duplicate delivery prevented during member join/leave transition.",
             },
             lesson: { notes: "Share group checkpoint prevented duplicate message delivery during rebalance." },
             slackMessage: "✅ Share group rebalance resolved · offsets checkpointed · lag 600→0",
@@ -672,9 +672,9 @@ function runPartitionImbalance(dispatch: DispatchFn): () => void {
       sendEmail(dispatch, "partition-imbalance", "Partition Imbalance", 0, 0, "kafka.rebalancePartitions", {
         approvedBy: "system",
         reasoning: {
-          rootCause: "Partition imbalance detected: broker-0 carrying 60% of partition load",
+          rootCause: "Partition leader imbalance detected: broker-0 carrying 60% of load — preferred leader election skipped after broker restart",
           confidence: 0.88, kafkaFeature: "KIP-848 Cooperative Rebalancing",
-          rationale: "Load imbalance detected during cooperative rebalance. Alert suppressed — imbalance self-correcting.",
+          rationale: "Partition leader imbalance after broker restart. Auto-leader-rebalance temporarily disabled during rolling upgrade — imbalance is self-correcting. Rack-aware assignment drift is benign until next preferred leader election. Suppressing alert to prevent false escalation.",
         },
         lesson: { notes: "Partition rebalance was self-correcting. No manual intervention needed." },
         slackMessage: "ℹ️ Partition imbalance rebalance completed — load redistributed across brokers",
@@ -714,7 +714,7 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
     { ms: 6000, fn: () => {
       agents = patch(agents, "monitor", { status: "acting", mralPhase: "act",
         lastReasoning: {
-          rootCause: "Routine rolling-restart rebalance — not a lag anomaly",
+          rootCause: "Normal partition rebalance during rolling consumer deployment — not a lag anomaly",
           confidence: 0.97,
           kafkaFeatureCited: "KIP-848 Share Groups",
           rebalanceState: "Rebalancing",
@@ -722,7 +722,7 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
           crossCorrelation: { brokers: "healthy", jvmHeap: "41%", networkInRate: "normal", rebalanceInProgress: true },
           recommendedAction: "suppress — no action needed",
           requiresApproval: false,
-          rationale: "Lag 120 msgs/s is within SLO. Rebalance is routine rolling restart, not a spike. Suppressing alert to prevent alert fatigue.",
+          rationale: "Lag 120 msgs/s is within SLO. Lag briefly rises during consumer startup before threads reach full throughput — this is expected KIP-848 cooperative rebalance churn. Short-lived network blip caused transient lag that self-resolves. Group coordinator election during maintenance mimics outage signature but is benign. Suppressing alert.",
           lessonsCited: ["lesson-007"],
         }
       });
@@ -748,9 +748,9 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
       sendEmail(dispatch, "benign-rebalance", "False-Positive Suppression", 120, 0, "kafka.suppressRebalancePage", {
         approvedBy: "system",
         reasoning: {
-          rootCause: "Rebalance alert fired during expected KIP-848 cooperative rebalance (120 msgs lag)",
+          rootCause: "False positive: KIP-848 cooperative rebalance during rolling deployment — lag within tolerance",
           confidence: 0.97, kafkaFeature: "KIP-848 Cooperative Rebalancing",
-          rationale: "Lag within cooperative rebalance tolerance (< 300 msgs). Alert is a false positive — suppressing page.",
+          rationale: "Lag 120 msgs is within cooperative rebalance tolerance (< 300 msgs). Consumer startup transient — threads have not yet reached full throughput. Group coordinator election during maintenance looks like outage but self-resolves. Suppressing page — not a real incident.",
         },
         lesson: { notes: "False-positive suppression worked correctly. Rebalance lag < 300 msgs is within tolerance." },
         slackMessage: "🔇 Alert suppressed — benign cooperative rebalance in progress (lag 120, within tolerance)",
@@ -785,8 +785,8 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Schema Registry version conflict — Avro v2 vs v1", kafkaFeature: "Schema Registry", confidence: 0.93,
-        rationale: "Producers upgraded to Avro schema v2; consumers still registered for v1. BACKWARD compatibility not enforced in schema registry." } });
+      lastReasoning: { rootCause: "Schema Registry version conflict: producer deployed Avro v2 schema without BACKWARD_TRANSITIVE mode — consumer deserialization failing with SchemaParseException", kafkaFeature: "Schema Registry", confidence: 0.93,
+        rationale: "Producer updated Avro schema without backward-compatible evolution. Consumer deserialization fails with SchemaParseException on new fields. Schema registry compatibility mode was not enforced (BACKWARD → NONE). Two producer versions may be writing incompatible schemas to the same topic simultaneously. Updating compatibility mode to BACKWARD_TRANSITIVE and hot-redeploying consumers with dual-read support." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 2 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Deserialization exception rate: 340/min on payment-processor group. Schema id=12 expected, id=15 received. BACKWARD compatibility broken.", "reasoning") });
   });
@@ -853,7 +853,7 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
           dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Schema Mismatch Resolved", message: "✅ Schema v2 BACKWARD_TRANSITIVE applied — consumers healthy, lag 8400→0", scenarioId: "schema-mismatch" } });
           sendEmail(dispatch, "schema-mismatch", "Schema Registry Mismatch", LAG, 0, "kafka.updateSchemaCompatibility(BACKWARD_TRANSITIVE)", {
             approved: true, approvedBy: "operator",
-            reasoning: { rootCause: "Avro schema v2 deployed without BACKWARD_TRANSITIVE mode — broke consumers on payments.transactions.v1", confidence: 0.93, kafkaFeature: "Schema Registry", rationale: "Re-registered v2 schema in BACKWARD_TRANSITIVE mode; consumers hot-redeployed with dual-read support." },
+            reasoning: { rootCause: "Avro schema v2 deployed without BACKWARD_TRANSITIVE — consumers failing on payments.transactions.v1; schema registry compatibility mode was NONE", confidence: 0.93, kafkaFeature: "Schema Registry", rationale: "Re-registered v2 schema in BACKWARD_TRANSITIVE mode; consumers hot-redeployed with dual-read support." },
             lesson: { notes: "Always register new Avro schemas in BACKWARD_TRANSITIVE mode before deploying producers. Gate producer releases on schema compatibility check." },
             slackMessage: "✅ Schema mismatch resolved on payments.transactions.v1 — lag 8400→0",
             itsmTicket: `INC-${Date.now().toString().slice(-5)} — Schema Registry Mismatch`,
@@ -901,8 +901,8 @@ function runDiskSaturation(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Uncompacted segment accumulation on broker-2", kafkaFeature: "Log Compaction", confidence: 0.91,
-        rationale: "log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1 (target 0.5). 12GB uncompacted segments in last 6h." } });
+      lastReasoning: { rootCause: "Broker disk saturation: log cleaner thread fell behind — compacted topics accumulating undeleted segments on broker-2", kafkaFeature: "Log Compaction", confidence: 0.91,
+        rationale: "Log retention policy misconfigured — compacted topics accumulating without cleanup. Sudden traffic spike wrote log segments faster than disk throughput could handle. log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1 (target 0.5). Large batch producers sending oversized messages exhausted available disk — 12GB uncompacted segments accumulated in last 6h. Auto-remediation triggered." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Root cause: log.cleaner.threads=1 saturated. Dirty ratio 0.78 on invoices.created.v1 (threshold 0.5). 12GB uncompacted in 6h.", "reasoning") });
   });
@@ -979,8 +979,8 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
   t(2200, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Broker-3 OOM crash — ISR shrunk to 1, minISR=2 violated", kafkaFeature: "KRaft ISR Management", confidence: 0.97,
-        rationale: "Broker-3 suffered JVM OOM. ISR on payments.settlements.v1 dropped to 1/3. Producers receiving NotEnoughReplicasException. Settlement batches at risk." } });
+      lastReasoning: { rootCause: "Under-replicated partitions: broker-3 GC pause exceeded replica.lag.time.max.ms — dropped from ISR, minISR=2 violated on payments.settlements.v1", kafkaFeature: "KRaft ISR Management", confidence: 0.97,
+        rationale: "Broker-3 GC pause exceeded replica.lag.time.max.ms causing it to be dropped from ISR. Disk I/O saturation on follower prevented replication throughput. Rack-aware replica placement violated with this broker failure — one rack now under-covered. ISR dropped to 1/3 on payments.settlements.v1. Producers receiving NotEnoughReplicasException. Partition reassignment required to restore durability." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(LAG), pendingApprovals: [], incidentQueueDepth: 3 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Broker-3 OOM. ISR: 3→1 on payments.settlements.v1 (all 4 partitions). Producers blocked on acks=all. 18,900 msg backlog.", "reasoning") });
   });
@@ -1047,7 +1047,7 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
           dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "itsm", title: "Under-Replication Resolved", message: "✅ payments.settlements.v1 ISR restored 1→3. Lag 18,900→0. SEV-1 resolved.", scenarioId: "under-replication" } });
           sendEmail(dispatch, "under-replication", "Under-Replicated Partitions", LAG, 0, "kafka.reassignPartitions(broker-3→broker-1)", {
             approved: true, approvedBy: "operator",
-            reasoning: { rootCause: "Broker-3 JVM OOM — ISR on payments.settlements.v1 shrunk to 1 (minISR=2)", confidence: 0.97, kafkaFeature: "KRaft ISR Management", rationale: "Reassigned 4 partitions to broker-1. ISR restored. Lag fully drained." },
+            reasoning: { rootCause: "Broker-3 GC pause + disk I/O saturation caused ISR shrinkage to 1 (minISR=2) — rack coverage violated", confidence: 0.97, kafkaFeature: "KRaft ISR Management", rationale: "Reassigned 4 partitions to broker-1. ISR restored. Lag fully drained." },
             lesson: { notes: "Set JVM heap to 70% of RAM with -XX:+UseG1GC. Alert at ISR < minISR within 30s. Keep broker-3 headroom >30%." },
             slackMessage: "✅ payments.settlements.v1 ISR restored 1→3. Settlement batches resuming.",
             itsmTicket: `SEV1-${Date.now().toString().slice(-5)} — Under-Replicated Partitions AUTO-RESOLVED`,
@@ -1095,8 +1095,8 @@ function runProducerTimeout(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Producer batch accumulator exhausted — linger.ms/batch.size mismatch under peak load", kafkaFeature: "Producer Config", confidence: 0.89,
-        rationale: "batch.size=65536 (64KB) and linger.ms=5 causing 340 batches/s to exhaust accumulator at 1.2× normal throughput. Record-queue-time P99 hit 4.8s." } });
+      lastReasoning: { rootCause: "Producer ACK timeout storm: broker leader election exceeded request.timeout.ms — acks=all stalled during ISR under-replication", kafkaFeature: "Producer Config", confidence: 0.89,
+        rationale: "Broker leader election taking longer than request.timeout.ms, expiring producer ACKs. acks=all with under-replicated partition means no acknowledgement until ISR recovers. Network congestion between producer host and broker caused ACK timeout cascade. Producer batch size (64KB) too small for available broker memory, triggering request queuing. Record-queue-time P99 hit 4.8s — auto-remediation triggered." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(2100), pendingApprovals: [], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "record-queue-time P99: 4.8s (SLO: 500ms). batch.size 64KB saturated at 340 batches/s peak. buffer.memory 80% consumed.", "reasoning") });
   });
@@ -1131,7 +1131,7 @@ function runProducerTimeout(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #producer-ops: timeout storm resolved. Config change documented in runbook.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Producer Timeout Resolved", message: "✅ payments-gateway P99 queue-time 4.8s→180ms · batch.size 64KB→2MB", scenarioId: "producer-timeout" } });
     sendEmail(dispatch, "producer-timeout", "Producer Timeout Storm", 2100, 0, "kafka.tuneProducerConfig(batch.size=2MB, linger.ms=20)", {
-      reasoning: { rootCause: "batch.size=64KB exhausted under 1.2× peak throughput on payments-gateway", confidence: 0.89, kafkaFeature: "Producer Config", rationale: "Increased batch.size to 2MB and linger.ms to 20ms — 28× batch efficiency gain, P99 4.8s→180ms." },
+      reasoning: { rootCause: "Producer ACK timeouts: leader election latency + acks=all under ISR violation created timeout cascade on payments-gateway", confidence: 0.89, kafkaFeature: "Producer Config", rationale: "Increased batch.size to 2MB and linger.ms to 20ms — 28× batch efficiency gain, P99 4.8s→180ms." },
       lesson: { notes: "Set batch.size=2MB and linger.ms=15-20ms for high-throughput producers. Alert on record-queue-time P99 > 500ms." },
       slackMessage: "✅ Producer timeout storm resolved — P99 queue-time 4.8s→180ms",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Producer Timeout Storm`,
@@ -1171,8 +1171,8 @@ function runConsumerSessionTimeout(dispatch: DispatchFn): () => void {
   t(2200, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "JVM GC pause (P99: 12.4s) exceeds session.timeout.ms=10s on payment-processor", kafkaFeature: "Consumer Group Protocol", confidence: 0.92,
-        rationale: "payment-processor instances running CMS GC with 4GB heap. GC pause P99 12.4s > session.timeout 10s. Group coordinator evicting members every ~90s." } });
+      lastReasoning: { rootCause: "Consumer session timeout: JVM GC stop-the-world pause (P99: 12.4s) exceeded session.timeout.ms=10s — group coordinator evicting members", kafkaFeature: "Consumer Group Protocol", confidence: 0.92,
+        rationale: "Consumer JVM GC stop-the-world pause (P99: 12.4s) exceeded session.timeout.ms=10s. Consumer application deadlock may have prevented poll loop from running within max.poll.interval.ms. Network partition between consumer and group coordinator triggered session expiry. Consumer processing oversized record batch beyond the heartbeat interval. Group coordinator evicting members every ~90s — rebalance storm ongoing." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(3400), pendingApprovals: [], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "GC pause P99=12.4s on payment-processor instances. session.timeout=10s evicts members. Triggers full rebalance · 3,400 msg lag spike per event.", "reasoning") });
   });
@@ -1207,7 +1207,7 @@ function runConsumerSessionTimeout(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #consumer-ops: session timeout resolved. G1GC migration ticket opened.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Session Timeout Resolved", message: "✅ payment-processor rebalance storm resolved · session.timeout 10s→45s · lag clear", scenarioId: "consumer-session-timeout" } });
     sendEmail(dispatch, "consumer-session-timeout", "Consumer Session Timeout Storm", 3400, 0, "kafka.updateConsumerConfig(session.timeout.ms=45000)", {
-      reasoning: { rootCause: "GC pause P99=12.4s exceeds session.timeout.ms=10s on payment-processor group", confidence: 0.92, kafkaFeature: "Consumer Group Protocol", rationale: "Increased session.timeout to 45s and heartbeat.interval to 15s. Rebalance storm eliminated." },
+      reasoning: { rootCause: "GC pause P99=12.4s exceeded session.timeout — consumer heartbeat missed, group coordinator triggered rebalance storm", confidence: 0.92, kafkaFeature: "Consumer Group Protocol", rationale: "Increased session.timeout to 45s and heartbeat.interval to 15s. Rebalance storm eliminated." },
       lesson: { notes: "Set session.timeout.ms = 3× GC pause P99. Use G1GC to keep pauses <1s. Alert on rebalance rate >5/hour." },
       slackMessage: "✅ Consumer session timeout resolved — rebalance storm stopped",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Consumer Session Timeout Storm`,
@@ -1247,8 +1247,8 @@ function runCompactionLag(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Cleaner thread backlog — tombstone write rate exceeds compaction throughput", kafkaFeature: "Log Compaction", confidence: 0.88,
-        rationale: "invoices.created.v1 tombstone write rate 8,000/min exceeds cleaner throughput of 5,200/min. __consumer_offsets compaction queue depth 240 (healthy: <20)." } });
+      lastReasoning: { rootCause: "Log compaction lag: log.cleaner.threads insufficient for volume — tombstone write rate (8,000/min) exceeds compaction throughput (5,200/min)", kafkaFeature: "Log Compaction", confidence: 0.88,
+        rationale: "Log cleaner thread count (2) insufficient for volume of compacted topics. High write throughput caused dirty ratio to spike faster than cleanup could proceed. Compaction I/O competing with replication I/O on the same disk controller. Large number of unique keys producing high tombstone volume slowing cleanup passes. __consumer_offsets compaction queue depth 240 (healthy: <20) — auto-remediation triggered." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(0), pendingApprovals: [], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Tombstone write rate 8,000/min > cleaner capacity 5,200/min. Queue depth 240. Topic size growing 2.1GB/day. Retention at risk.", "reasoning") });
   });
@@ -1283,7 +1283,7 @@ function runCompactionLag(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #kafka-ops: compaction lag resolved. Runbook updated with cleaner tuning guide.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Compaction Lag Resolved", message: "✅ invoices.created.v1 cleaner queue 240→12 · topic growth normalised", scenarioId: "compaction-lag" } });
     sendEmail(dispatch, "compaction-lag", "Log Compaction Lag", 0, 0, "kafka.updateTopicConfig(min.compaction.lag.ms=1h, cleanerThreads=6)", {
-      reasoning: { rootCause: "Tombstone write rate 8,000/min exceeded cleaner throughput 5,200/min on invoices.created.v1", confidence: 0.88, kafkaFeature: "Log Compaction", rationale: "Increased cleaner threads 2→6. Queue depth 240→12. Topic growth rate normalised." },
+      reasoning: { rootCause: "Tombstone write rate (8,000/min) exceeded cleaner throughput (5,200/min) — compaction I/O contention with replication on disk controller", confidence: 0.88, kafkaFeature: "Log Compaction", rationale: "Increased cleaner threads 2→6. Queue depth 240→12. Topic growth rate normalised." },
       lesson: { notes: "Monitor log.cleaner.backoff.ms and queue depth. Alert when uncompacted ratio >0.5. Run 4+ cleaner threads on compacted topics." },
       slackMessage: "✅ Compaction lag resolved — invoices.created.v1 cleaner queue 240→12",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Log Compaction Lag`,
