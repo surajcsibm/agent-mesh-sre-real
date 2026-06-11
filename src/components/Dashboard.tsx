@@ -1999,6 +1999,8 @@ export default function Dashboard() {
   const [summaryHistory, setSummaryHistory]   = useState<EmailSummaryData[]>([]);
   const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
+  const [approvalToast, setApprovalToast] = useState<string | null>(null);
+  const approvalToastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Canvas height — +/- resizable
   // Default is 660 so the ephemeral REASON/ACT/LEARN sub-agent bubbles (y=545–635)
@@ -2114,6 +2116,19 @@ export default function Dashboard() {
     triggerTopicAction(payload);
   };
 
+
+  // Approval gate toast — shows when gates open, clears after 60s
+  useEffect(() => {
+    const n = state.pendingApprovals.length;
+    if (n > 0) {
+      setApprovalToast(n === 1 ? "🔐 1 approval gate pending — see right panel" : `🔐 ${n} approval gates pending — see right panel`);
+      if (approvalToastRef.current) clearTimeout(approvalToastRef.current);
+      approvalToastRef.current = setTimeout(() => setApprovalToast(null), 60_000);
+    } else {
+      setApprovalToast(null);
+      if (approvalToastRef.current) { clearTimeout(approvalToastRef.current); approvalToastRef.current = null; }
+    }
+  }, [state.pendingApprovals.length]);
   return (
     <div className="h-screen overflow-hidden flex flex-col" style={{ background: "#f0f4f8" }}>
 
@@ -2471,6 +2486,67 @@ export default function Dashboard() {
         {/* Right sidebar — audit log */}
         <aside className="w-80 shrink-0 flex flex-col p-4 overflow-hidden"
                style={{ background: "#f8fafc", borderLeft: "1px solid #dce5ef" }}>
+          {/* ── Pending Approvals panel (always visible) ── */}
+          <div id="pending-approvals-panel" style={{
+            marginBottom:12, paddingBottom:12, borderBottom:"1px solid #e2e8f0",
+          }}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{
+                width:8,height:8,borderRadius:"50%",display:"inline-block",
+                background:state.pendingApprovals.length>0?"#f59e0b":"#22d3ee",
+              }}/>
+              <span style={{fontSize:11,fontWeight:800,color:"#1e3a5f",
+                letterSpacing:"0.06em",textTransform:"uppercase"}}>
+                Pending Approvals
+              </span>
+              {state.pendingApprovals.length>0&&(
+                <span style={{marginLeft:4,background:"#fef3c7",color:"#92400e",
+                  borderRadius:20,padding:"1px 8px",fontWeight:700,fontSize:10,
+                  border:"1px solid #fcd34d"}}>{state.pendingApprovals.length}</span>
+              )}
+            </div>
+            {state.pendingApprovals.length===0?(
+              <div style={{textAlign:"center",padding:"8px 0"}}>
+                <p style={{fontSize:12,color:"#94a3b8"}}>✓ No pending approvals</p>
+                <p style={{fontSize:10,color:"#b0bec8",marginTop:2}}>Approval gates appear here automatically</p>
+              </div>
+            ):(state.pendingApprovals.map((ap,idx)=>(
+              <div key={ap.id} style={{
+                border:`1px solid ${idx===0?"#fcd34d":"#e2e8f0"}`,
+                borderLeft:`3px solid ${idx===0?"#f59e0b":"#94a3b8"}`,
+                borderRadius:10,padding:"10px 12px",marginBottom:8,
+                background:idx===0?"#fffbeb":"#f8fafc",
+              }}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                  <span style={{fontSize:12}}>{idx===0?"🔐":"⏳"}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:"#1e3a5f",flex:1}}>
+                    {ap.scenarioId?.replace(/-/g," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())||"Approval Required"}
+                  </span>
+                  <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:20,
+                    background:idx===0?"#fef3c7":"#f1f5f9",color:idx===0?"#92400e":"#64748b",
+                    border:`1px solid ${idx===0?"#fcd34d":"#e2e8f0"}`}}>
+                    {idx===0?"Active":`#${idx+1}`}
+                  </span>
+                </div>
+                {ap.reason&&(
+                  <p style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.4,
+                    background:"#f1f5f9",padding:"4px 8px",borderRadius:6}}>
+                    {String(ap.reason).slice(0,110)}{String(ap.reason).length>110?"…":""}
+                  </p>
+                )}
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>approve(ap.id,"approve")} style={{
+                    flex:1,padding:"6px 0",borderRadius:7,border:"none",
+                    cursor:"pointer",background:"#16a34a",color:"#fff",fontWeight:700,fontSize:11
+                  }}>✓ Approve</button>
+                  <button onClick={()=>approve(ap.id,"reject")} style={{
+                    flex:1,padding:"6px 0",borderRadius:7,border:"1px solid #e2e8f0",
+                    cursor:"pointer",background:"#fff",color:"#dc2626",fontWeight:700,fontSize:11
+                  }}>✗ Reject</button>
+                </div>
+              </div>
+            )))}
+          </div>
           <div className="flex-1 overflow-hidden">
             <AuditLogPanel log={state.auditLog} />
           </div>
@@ -2507,7 +2583,24 @@ export default function Dashboard() {
 
       {/* Overlays */}
       {console.log("[Dashboard] pendingApprovals:", state.pendingApprovals)}
-      <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} />
+      {/* ── Approval gate toast ── */}
+      {approvalToast && (
+        <div style={{
+          position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)",
+          zIndex:9999, background:"#1e3a5f", color:"#fff",
+          padding:"11px 20px", borderRadius:12,
+          boxShadow:"0 4px 24px rgba(0,0,0,0.35)",
+          fontSize:13, fontWeight:600,
+          display:"flex", alignItems:"center", gap:10,
+          border:"1px solid #f59e0b",
+        }}>
+          <span>{approvalToast}</span>
+          <button onClick={()=>setApprovalToast(null)}
+            style={{background:"none",border:"none",color:"#94a3b8",
+              cursor:"pointer",fontSize:18,lineHeight:1,padding:0}}>×</button>
+        </div>
+      )}
+      {/* <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} /> */}
       { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
       {viewHistorySummary && (
         <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} />
