@@ -71,7 +71,7 @@ export type SimAction =
   | { type: "notification"; record: NotificationRecord }
   | { type: "lesson"; record: LessonRecord }
   | { type: "connected"; value: boolean }
-  | { type: "emailSummary"; data: EmailSummaryData | null };
+  | { type: "emailSummary"; data: EmailSummaryData | null }
 
 interface SimStatePayload {
   agents: AgentState[];
@@ -217,6 +217,7 @@ function sendEmail(
       dispatch({
         type: "emailSummary",
         data: {
+          completedAt: Date.now(),
           scenarioLabel, scenarioId, action,
           lagBefore, lagAfter, approved, approvedBy,
           sent: data.ok, emailError: data.ok ? undefined : data.error,
@@ -232,6 +233,7 @@ function sendEmail(
       dispatch({
         type: "emailSummary",
         data: {
+          completedAt: Date.now(),
           scenarioLabel, scenarioId, action,
           lagBefore, lagAfter, approved, approvedBy,
           sent: false, emailError: "network_error",

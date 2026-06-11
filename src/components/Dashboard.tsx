@@ -1639,6 +1639,11 @@ function ScenarioHistoryBar({ history, onView }: {
                 {h.scenarioLabel}
               </span>
 
+              {h.completedAt && (
+                <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0, marginLeft: 16, fontWeight: 400, whiteSpace: "nowrap" }}>
+                  {new Date(h.completedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                </span>
+              )}
               {/* Confidence */}
               {confidence !== null && (
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", flexShrink: 0 }}>
@@ -2503,7 +2508,7 @@ export default function Dashboard() {
       <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} />
       { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
       {viewHistorySummary && (
-{/* ScenarioEndModal removed */}
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} />
       )}
       {selectedTopic && !pendingDelete && (
         <TopicModal
