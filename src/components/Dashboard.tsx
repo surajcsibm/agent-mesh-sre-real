@@ -501,6 +501,116 @@ function ApprovalGate({ approvals, onDecide, onClose }: {
   );
 }
 
+// ── Lesson detail modal ───────────────────────────────────────────────────────
+
+function LessonDetailModal({ lesson, onClose }: { lesson: import("@/lib/types").LessonRecord; onClose: () => void }) {
+  const ts = new Date(lesson.ts).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4
+                    animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[520px] flex flex-col animate-[slideUp_0.25s_ease-out]"
+           style={{ maxHeight: "calc(100vh - 2rem)", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+
+        {/* Header */}
+        <div style={{ background: "linear-gradient(135deg,#064e3b 0%,#1D9E75 100%)",
+                      padding: "20px 24px", flexShrink: 0, borderRadius: "16px 16px 0 0",
+                      display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              📚 Lesson Learned
+            </div>
+            <div style={{ fontSize: 11, color: "#a7f3d0" }}>
+              [{lesson.scenarioId}] &nbsp;·&nbsp; {ts}
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)",
+            borderRadius: 8, color: "#fff", cursor: "pointer", fontSize: 16, fontWeight: 700,
+            width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          }}>✕</button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0, padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Action taken */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
+                          letterSpacing: "0.7px", marginBottom: 6 }}>Action Taken</div>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8,
+                          padding: "10px 14px", fontSize: 13, color: "#14532d", fontWeight: 600 }}>
+              {lesson.actionTaken}
+            </div>
+          </div>
+
+          {/* Outcome */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
+                          letterSpacing: "0.7px", marginBottom: 6 }}>Outcome</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {lesson.effective
+                ? <span style={{ background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac",
+                                  borderRadius: 20, padding: "3px 12px", fontSize: 12, fontWeight: 700 }}>✅ Effective</span>
+                : <span style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5",
+                                  borderRadius: 20, padding: "3px 12px", fontSize: 12, fontWeight: 700 }}>⚠️ Not Effective</span>
+              }
+            </div>
+          </div>
+
+          {/* Lag before/after */}
+          {(lesson.lagBefore != null || lesson.lagAfter != null) && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
+                            letterSpacing: "0.7px", marginBottom: 6 }}>Lag Impact</div>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8,
+                            padding: "10px 14px", fontSize: 13, color: "#1e3a5f", fontWeight: 600 }}>
+                {lesson.lagBefore?.toLocaleString() ?? "—"} → {lesson.lagAfter?.toLocaleString() ?? "—"} messages
+              </div>
+            </div>
+          )}
+
+          {/* Adjusted threshold */}
+          {lesson.adjustedThreshold != null && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
+                            letterSpacing: "0.7px", marginBottom: 6 }}>Adjusted Threshold</div>
+              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8,
+                            padding: "10px 14px", fontSize: 13, color: "#1d4ed8", fontWeight: 600 }}>
+                {lesson.adjustedThreshold.toLocaleString()} messages
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
+                          letterSpacing: "0.7px", marginBottom: 6 }}>Notes</div>
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8,
+                          padding: "12px 14px", fontSize: 13, color: "#334155", lineHeight: 1.7 }}>
+              {lesson.notes || "No notes recorded."}
+            </div>
+          </div>
+
+          {/* Lesson ID */}
+          <div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace", paddingTop: 4,
+                        borderTop: "1px solid #f1f5f9" }}>
+            ID: {lesson.id}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 24px", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
+          <button onClick={onClose}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none",
+                     background: "#1D9E75", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Scenario-end modal — mirrors the email template visually ─────────────────
 
 function DataRow({ label, children, last = false }: { label: string; children: React.ReactNode; last?: boolean }) {
@@ -626,18 +736,45 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
           <div style={{ marginTop: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
                           letterSpacing: "0.8px", marginBottom: 8 }}>📚 Learn</div>
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px" }}>
-              <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.6 }}>
-                {isRejected
-                  ? "No lesson recorded — action was rejected by operator. Cluster was not modified."
-                  : (data.lesson?.notes ?? "No lesson recorded.")}
+            {isRejected || !data.lesson ? (
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px",
+                            fontSize: 13, color: "#94a3b8", fontStyle: "italic" }}>
+                {isRejected ? "No lesson recorded — action was rejected by operator." : "No lesson recorded."}
               </div>
-              {!isRejected && data.lesson?.adjustedThreshold && (
-                <div style={{ fontSize: 12, color: "#3b82f6", marginTop: 5, fontWeight: 600 }}>
-                  Adjusted threshold → {data.lesson.adjustedThreshold.toLocaleString()} msgs
+            ) : (
+              <div style={{ background: "linear-gradient(135deg,#e6f5f0,#f0faf7)",
+                            border: "1px solid #a3d9c8", borderLeft: "4px solid #1D9E75",
+                            borderRadius: 8, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Action taken */}
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
+                                letterSpacing: "0.6px", marginBottom: 4 }}>Action taken</div>
+                  <div style={{ fontSize: 13, color: "#14532d", fontWeight: 600 }}>{data.lesson.actionTaken}</div>
                 </div>
-              )}
-            </div>
+                {/* Outcome badge */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {data.lesson.effective
+                    ? <span style={{ background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac",
+                                      borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>✅ Effective</span>
+                    : <span style={{ background: "#fef9c3", color: "#b45309", border: "1px solid #fde68a",
+                                      borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>⚠️ Not effective</span>
+                  }
+                  {data.lesson.lagBefore != null && data.lesson.lagAfter != null && (
+                    <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
+                      Lag: {data.lesson.lagBefore.toLocaleString()} → {data.lesson.lagAfter.toLocaleString()} msgs
+                    </span>
+                  )}
+                </div>
+                {/* Notes */}
+                <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.6 }}>{data.lesson.notes}</div>
+                {/* Adjusted threshold */}
+                {data.lesson.adjustedThreshold != null && (
+                  <div style={{ fontSize: 12, color: "#1d4ed8", fontWeight: 600 }}>
+                    Adjusted threshold → {data.lesson.adjustedThreshold.toLocaleString()} msgs
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Notifications — removed; review via Scenario History bar ── */}{/* ── Live Events Timeline ── */}
@@ -2103,6 +2240,7 @@ export default function Dashboard() {
   const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
+  const [viewingLesson, setViewingLesson] = useState<import("@/lib/types").LessonRecord | null>(null);
 
   // Canvas height — +/- resizable
   // Default is 660 so the ephemeral REASON/ACT/LEARN sub-agent bubbles (y=545–635)
@@ -2643,7 +2781,7 @@ export default function Dashboard() {
             <AuditLogPanel log={state.auditLog} />
           </div>
 
-          {/* Lessons learned — emerald Arctic */}
+          {/* Lessons learned — emerald Arctic, clickable, full history */}
           {state.lessons.length > 0 && (
             <div className="shrink-0 mt-4 pt-3" style={{ borderTop: "1px solid #dce5ef" }}>
               <div className="flex items-center gap-1.5 mb-3">
@@ -2653,19 +2791,33 @@ export default function Dashboard() {
                   Lessons Learned
                 </span>
                 <span className="text-xs font-normal ml-1" style={{ color: "#94a3b8" }}>({state.lessons.length})</span>
+                <span className="text-[9px] ml-auto" style={{ color: "#94a3b8" }}>click to expand</span>
               </div>
-              <div className="space-y-2 max-h-44 overflow-y-auto">
-                {[...state.lessons].reverse().slice(0, 6).map((l) => (
-                  <div key={l.id}
-                    className="rounded-xl px-3 py-3"
-                    style={{ background: "linear-gradient(135deg,#e6f5f0,#f0faf7)", border: "1px solid #a3d9c8" }}>
-                    <div className="text-xs font-bold truncate mb-1" style={{ color: "#0F6E56" }}>
-                      [{l.scenarioId}] {l.actionTaken}
+              <div className="space-y-2 overflow-y-auto" style={{ maxHeight: "260px" }}>
+                {[...state.lessons].reverse().map((l) => (
+                  <button key={l.id}
+                    onClick={() => setViewingLesson(l)}
+                    className="w-full text-left rounded-xl px-3 py-3 transition-all"
+                    style={{ background: "linear-gradient(135deg,#e6f5f0,#f0faf7)",
+                             border: "1px solid #a3d9c8", cursor: "pointer" }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#1D9E75"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 0 0 2px #1D9E7520"; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#a3d9c8"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "none"; }}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="text-xs font-bold truncate" style={{ color: "#0F6E56" }}>
+                        [{l.scenarioId}] {l.actionTaken}
+                      </div>
+                      {l.effective
+                        ? <span style={{ fontSize: 9, fontWeight: 700, color: "#16a34a", background: "#dcfce7",
+                                          border: "1px solid #86efac", borderRadius: 20, padding: "1px 6px", flexShrink: 0 }}>✅ effective</span>
+                        : <span style={{ fontSize: 9, fontWeight: 700, color: "#b45309", background: "#fef9c3",
+                                          border: "1px solid #fde68a", borderRadius: 20, padding: "1px 6px", flexShrink: 0 }}>⚠️ review</span>
+                      }
                     </div>
                     <div className="text-xs leading-relaxed" style={{ color: "#475569" }}>
-                      {l.notes.slice(0, 90)}{l.notes.length > 90 ? "…" : ""}
+                      {l.notes.slice(0, 80)}{l.notes.length > 80 ? "…" : ""}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -2686,6 +2838,9 @@ export default function Dashboard() {
         />
       )}
       { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
+      {viewingLesson && (
+        <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
+      )}
       {viewHistorySummary && (
         <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} />
       )}
