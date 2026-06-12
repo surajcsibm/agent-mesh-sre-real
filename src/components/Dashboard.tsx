@@ -307,106 +307,51 @@ function describeToolCall(toolCall: MCPToolCall) {
 
 // ── Scenario trigger reasons — shown in the approval gate ────────────────────
 
-const SCENARIO_TRIGGER_REASONS: Record<string, { title: string; conditions: string[] }> = {
-  "lag-spike": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Consumer group processing rate fell below producer write rate for a sustained period",
-      "Downstream service slowdown (DB bottleneck or GC pause) caused consumer threads to stall",
-      "Broker rebalance mid-consumption forced a pause while partitions were reassigned",
-      "Topic partition count too low for consumer group size, creating hotspot partitions",
-    ],
-  },
-  "controller-failover": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Active KRaft controller broker process crashed or became unresponsive",
-      "Network partition isolated the controller from quorum voters",
-      "JVM out-of-memory on the controller node triggered OS process kill",
-      "Rolling restart or planned maintenance caused epoch increment",
-    ],
-  },
-  "share-group": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Share group member joined or left, causing in-flight record redistribution",
-      "Consumer missed heartbeat deadline triggering group coordinator timeout",
-      "Share group queue depth exceeded configured fetch limit triggering rebalance",
-      "Broker partition leadership moved, invalidating existing share group assignments",
-    ],
-  },
-  "benign-rebalance": {
-    title: "Why this was suppressed (no action needed)",
-    conditions: [
-      "Normal partition rebalance during rolling consumer deployment — expected churn",
-      "Lag briefly rises during consumer startup before threads reach full throughput",
-      "Group coordinator election during broker maintenance looks like an outage",
-      "Short-lived network blip causes transient lag that self-resolves within seconds",
-    ],
-  },
-  "schema-mismatch": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Producer updated Avro/Protobuf schema without backward-compatible evolution",
-      "Consumer deserialization fails with SchemaParseException on new field",
-      "Schema registry compatibility mode changed from BACKWARD to NONE",
-      "Two producer versions writing incompatible schemas to the same topic simultaneously",
-    ],
-  },
-  "disk-saturation": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Log retention policy misconfigured — compacted topics accumulating without cleanup",
-      "Sudden traffic spike wrote log segments faster than disk throughput could handle",
-      "Log cleaner thread fell behind, leaving old segments undeleted",
-      "Large batch producers sending oversized messages exhausted available disk within hours",
-    ],
-  },
-  "under-replication": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Follower broker fell behind leader due to network bandwidth saturation",
-      "Broker GC pause exceeded replica.lag.time.max.ms, dropping it from ISR",
-      "Rack-aware replica placement violated with a broker failure leaving one rack under-covered",
-      "Disk I/O saturation on a follower prevented it from keeping up with replication throughput",
-    ],
-  },
-  "producer-timeout": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Broker leader election taking longer than request.timeout.ms, expiring producer ACKs",
-      "acks=all with an under-replicated partition — no acknowledgement until ISR recovers",
-      "Network congestion between producer host and broker caused ACK timeout cascade",
-      "Producer batch size too large for available broker memory, triggering request queuing",
-    ],
-  },
-  "consumer-session-timeout": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Consumer JVM GC stop-the-world pause exceeded session.timeout.ms",
-      "Application deadlock prevented the poll loop from running within max.poll.interval.ms",
-      "Network partition between consumer and broker group coordinator triggered session expiry",
-      "Consumer was processing an oversized record batch beyond the heartbeat interval",
-    ],
-  },
-  "compaction-lag": {
-    title: "Why this failure was triggered",
-    conditions: [
-      "Log cleaner thread count insufficient for the volume of compacted topics",
-      "High write throughput caused dirty ratio to spike faster than cleanup could run",
-      "Compaction I/O competing with replication I/O on the same disk controller",
-      "Large number of unique keys producing high tombstone volume, slowing cleanup passes",
-    ],
-  },
-  "partition-imbalance": {
-    title: "Why this was suppressed (no action needed)",
-    conditions: [
-      "Preferred leader election skipped after broker restart, leaving leadership uneven",
-      "Rack-aware assignment drifted after multiple broker replacements",
-      "Manual partition reassignment left leaders concentrated on fewer brokers",
-      "Auto-leader-rebalance disabled while one broker had disproportionate leadership count",
-    ],
-  },
+const SCENARIO_TRIGGER_REASONS: Record<string, { title: string; reasons: [string, string] }> = {
+  "lag-spike":               { title: "Top 2 most likely triggers", reasons: [
+    "Consumer group processing rate fell below producer write rate for a sustained period.",
+    "Downstream service slowdown (DB bottleneck or GC pause) caused consumer threads to stall.",
+  ]},
+  "controller-failover":     { title: "Top 2 most likely triggers", reasons: [
+    "Active KRaft controller broker process crashed or became unresponsive.",
+    "Network partition isolated the controller from quorum voters.",
+  ]},
+  "share-group":             { title: "Top 2 most likely triggers", reasons: [
+    "Share group member joined or left, causing in-flight record redistribution.",
+    "Consumer missed heartbeat deadline triggering group coordinator timeout.",
+  ]},
+  "benign-rebalance":        { title: "Top 2 reasons this was suppressed", reasons: [
+    "Normal partition rebalance during rolling consumer deployment — expected churn.",
+    "Lag briefly rises during consumer startup before threads reach full throughput.",
+  ]},
+  "schema-mismatch":         { title: "Top 2 most likely triggers", reasons: [
+    "Producer updated Avro/Protobuf schema without backward-compatible evolution.",
+    "Consumer deserialization failing with SchemaParseException on new field.",
+  ]},
+  "disk-saturation":         { title: "Top 2 most likely triggers", reasons: [
+    "Log retention policy misconfigured — compacted topics accumulating without cleanup.",
+    "Sudden traffic spike wrote log segments faster than disk throughput could handle.",
+  ]},
+  "under-replication":       { title: "Top 2 most likely triggers", reasons: [
+    "Follower broker fell behind leader due to network bandwidth saturation.",
+    "Broker GC pause exceeded replica.lag.time.max.ms, dropping it from ISR.",
+  ]},
+  "producer-timeout":        { title: "Top 2 most likely triggers", reasons: [
+    "Broker leader election exceeded request.timeout.ms, expiring in-flight producer ACKs.",
+    "acks=all with an under-replicated partition — no acknowledgement until ISR recovers.",
+  ]},
+  "consumer-session-timeout":{ title: "Top 2 most likely triggers", reasons: [
+    "Consumer JVM GC stop-the-world pause exceeded session.timeout.ms.",
+    "Application deadlock prevented the poll loop from running within max.poll.interval.ms.",
+  ]},
+  "compaction-lag":          { title: "Top 2 most likely triggers", reasons: [
+    "Log cleaner thread count insufficient for the volume of compacted topics.",
+    "High write throughput caused dirty ratio to spike faster than cleanup could run.",
+  ]},
+  "partition-imbalance":     { title: "Top 2 reasons this was suppressed", reasons: [
+    "Preferred leader election skipped after broker restart — imbalance is benign.",
+    "Rack-aware assignment drifted after multiple broker replacements, no action needed.",
+  ]},
 };
 
 // ── Approval gate ─────────────────────────────────────────────────────────────
@@ -475,19 +420,19 @@ function ApprovalGate({ approvals, onDecide, onClose }: {
                     }}>
                       <span style={{fontSize:13}}>⚠️</span> {tr.title}
                     </div>
-                    <ul style={{ margin:0, padding:0, listStyle:"none", display:"flex", flexDirection:"column", gap:6 }}>
-                      {tr.conditions.map((c, i) => (
-                        <li key={i} style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
+                    <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                      {tr.reasons.map((r, i) => (
+                        <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
                           <span style={{
-                            marginTop:2, width:16, height:16, borderRadius:"50%",
+                            marginTop:2, width:18, height:18, borderRadius:"50%",
                             background:"#fed7aa", color:"#c2410c",
                             fontSize:9, fontWeight:800, display:"flex",
                             alignItems:"center", justifyContent:"center", flexShrink:0,
                           }}>{i + 1}</span>
-                          <span style={{ fontSize:12, color:"#7c2d12", lineHeight:1.5 }}>{c}</span>
-                        </li>
+                          <span style={{ fontSize:12, color:"#7c2d12", lineHeight:1.6, fontWeight:500 }}>{r}</span>
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 );
               })()}
