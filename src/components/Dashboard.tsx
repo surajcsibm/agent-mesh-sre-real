@@ -365,7 +365,7 @@ function ApprovalGate({ approvals, onDecide, onClose }: {
 
   return (
     <div className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4
-                    animate-[fadeIn_0.2s_ease-out]">
+                    animate-[fadeIn_0.2s_ease-out] overflow-hidden">
       {approvals.map((a) => {
         const desc = describeToolCall(a.toolCall);
         return (
@@ -537,14 +537,14 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
     : `⚠️ Failed — ${data.emailError ?? "unknown"}`;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3
-                    animate-[fadeIn_0.2s_ease-out] overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[600px] overflow-hidden my-4
+    <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4
+                    animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[600px] flex flex-col my-4
                       animate-[slideUp_0.25s_ease-out]"
-           style={{ fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+           style={{ fontFamily: "'Segoe UI', Arial, sans-serif", maxHeight: "calc(100vh - 2rem)" }}>
 
-        {/* ── Header — matches email gradient ── */}
-        <div style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%)", padding: "24px 28px" }}>
+        {/* ── Header — matches email gradient — sticky ── */}
+        <div style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%)", padding: "24px 28px", flexShrink: 0, borderRadius: "16px 16px 0 0" }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: -0.3 }}>
             🤖 Agent Mesh SRE — Incident Summary
           </div>
@@ -557,6 +557,9 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             )}
           </div>
         </div>
+
+        {/* ── Scrollable body ── */}
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
 
         {/* ── MRAL badges ── */}
         <div style={{ padding: "14px 28px 0", display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -692,6 +695,7 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             {isRejected ? "Understood — no action taken" : "Got it"}
           </button>
         </div>
+        </div>{/* end scrollable body */}
       </div>
     </div>
   );
