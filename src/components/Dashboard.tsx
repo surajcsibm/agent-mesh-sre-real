@@ -2098,8 +2098,6 @@ export default function Dashboard() {
   const [summaryHistory, setSummaryHistory]   = useState<EmailSummaryData[]>([]);
   const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
-  const [approvalToast, setApprovalToast] = useState<string | null>(null);
-  const approvalToastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
 
   // Canvas height — +/- resizable
@@ -2221,12 +2219,7 @@ export default function Dashboard() {
   useEffect(() => {
     const n = state.pendingApprovals.length;
     if (n > 0) {
-      setApprovalToast(n === 1 ? "🔐 1 approval gate pending — see right panel" : `🔐 ${n} approval gates pending — see right panel`);
-      if (approvalToastRef.current) clearTimeout(approvalToastRef.current);
-      approvalToastRef.current = setTimeout(() => setApprovalToast(null), 60_000);
     } else {
-      setApprovalToast(null);
-      if (approvalToastRef.current) { clearTimeout(approvalToastRef.current); approvalToastRef.current = null; }
     }
   }, [state.pendingApprovals.length]);
   return (
@@ -2679,22 +2672,7 @@ export default function Dashboard() {
       {/* Overlays */}
       {console.log("[Dashboard] pendingApprovals:", state.pendingApprovals)}
       {/* ── Approval gate toast ── */}
-      {approvalToast && (
-        <div style={{
-          position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)",
-          zIndex:9999, background:"#1e3a5f", color:"#fff",
-          padding:"11px 20px", borderRadius:12,
-          boxShadow:"0 4px 24px rgba(0,0,0,0.35)",
-          fontSize:13, fontWeight:600,
-          display:"flex", alignItems:"center", gap:10,
-          border:"1px solid #f59e0b",
-        }}>
-          <span>{approvalToast}</span>
-          <button onClick={()=>setApprovalToast(null)}
-            style={{background:"none",border:"none",color:"#94a3b8",
-              cursor:"pointer",fontSize:18,lineHeight:1,padding:0}}>×</button>
-        </div>
-      )}
+
       {/* <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} /> */}
       {reviewingApproval && (
         <ApprovalGate
