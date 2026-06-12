@@ -3,7 +3,7 @@ import React from "react";
 
 import dynamic from "next/dynamic";
 import { useMeshStream } from "./useMeshStream";
-import type { ApprovalRequest, AuditRecord, MCPToolCall, AgentState } from "@/lib/types";
+import type { ApprovalRequest, AuditRecord, MCPToolCall, AgentState, LessonRecord } from "@/lib/types";
 import type { EmailSummaryData, TopicChangePayload, TopicHealPayload } from "./useMeshStream";
 import clsx from "clsx";
 import { useSession, signOut } from "next-auth/react";
@@ -503,7 +503,7 @@ function ApprovalGate({ approvals, onDecide, onClose }: {
 
 // ── Lesson detail modal ───────────────────────────────────────────────────────
 
-function LessonDetailModal({ lesson, onClose }: { lesson: import("@/lib/types").LessonRecord; onClose: () => void }) {
+function LessonDetailModal({ lesson, onClose }: { lesson: LessonRecord; onClose: () => void }) {
   const ts = new Date(lesson.ts).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4
@@ -745,32 +745,27 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
               <div style={{ background: "linear-gradient(135deg,#e6f5f0,#f0faf7)",
                             border: "1px solid #a3d9c8", borderLeft: "4px solid #1D9E75",
                             borderRadius: 8, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                {/* Action taken */}
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "#064e3b", textTransform: "uppercase",
-                                letterSpacing: "0.6px", marginBottom: 4 }}>Action taken</div>
-                  <div style={{ fontSize: 13, color: "#14532d", fontWeight: 600 }}>{data.lesson.actionTaken}</div>
-                </div>
-                {/* Outcome badge */}
+                {/* Lesson icon + label */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {data.lesson.effective
-                    ? <span style={{ background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac",
-                                      borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>✅ Effective</span>
-                    : <span style={{ background: "#fef9c3", color: "#b45309", border: "1px solid #fde68a",
-                                      borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>⚠️ Not effective</span>
-                  }
-                  {data.lesson.lagBefore != null && data.lesson.lagAfter != null && (
-                    <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
-                      Lag: {data.lesson.lagBefore.toLocaleString()} → {data.lesson.lagAfter.toLocaleString()} msgs
-                    </span>
-                  )}
+                  <span style={{ fontSize: 18 }}>📚</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: "#064e3b",
+                                 textTransform: "uppercase", letterSpacing: "0.7px" }}>Lesson Recorded</span>
+                  <span style={{ marginLeft: "auto", background: "#dcfce7", color: "#16a34a",
+                                 border: "1px solid #86efac", borderRadius: 20,
+                                 padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>✅ Effective</span>
                 </div>
                 {/* Notes */}
-                <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.6 }}>{data.lesson.notes}</div>
+                <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.7 }}>
+                  {data.lesson.notes}
+                </div>
                 {/* Adjusted threshold */}
                 {data.lesson.adjustedThreshold != null && (
-                  <div style={{ fontSize: 12, color: "#1d4ed8", fontWeight: 600 }}>
-                    Adjusted threshold → {data.lesson.adjustedThreshold.toLocaleString()} msgs
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8",
+                                   background: "#eff6ff", border: "1px solid #bfdbfe",
+                                   borderRadius: 6, padding: "2px 10px" }}>
+                      Threshold adjusted → {data.lesson.adjustedThreshold.toLocaleString()} msgs
+                    </span>
                   </div>
                 )}
               </div>
@@ -2240,7 +2235,7 @@ export default function Dashboard() {
   const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
-  const [viewingLesson, setViewingLesson] = useState<import("@/lib/types").LessonRecord | null>(null);
+  const [viewingLesson, setViewingLesson] = useState<LessonRecord | null>(null);
 
   // Canvas height — +/- resizable
   // Default is 660 so the ephemeral REASON/ACT/LEARN sub-agent bubbles (y=545–635)
@@ -2799,23 +2794,25 @@ export default function Dashboard() {
                     onClick={() => setViewingLesson(l)}
                     className="w-full text-left rounded-xl px-3 py-3 transition-all"
                     style={{ background: "linear-gradient(135deg,#e6f5f0,#f0faf7)",
-                             border: "1px solid #a3d9c8", cursor: "pointer" }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#1D9E75"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 0 0 2px #1D9E7520"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "#a3d9c8"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "none"; }}
+                             border: "1px solid #a3d9c8", cursor: "pointer",
+                             display: "block" }}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div className="text-xs font-bold truncate" style={{ color: "#0F6E56" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+                                  gap: 8, marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#0F6E56",
+                                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                         [{l.scenarioId}] {l.actionTaken}
                       </div>
-                      {l.effective
-                        ? <span style={{ fontSize: 9, fontWeight: 700, color: "#16a34a", background: "#dcfce7",
-                                          border: "1px solid #86efac", borderRadius: 20, padding: "1px 6px", flexShrink: 0 }}>✅ effective</span>
-                        : <span style={{ fontSize: 9, fontWeight: 700, color: "#b45309", background: "#fef9c3",
-                                          border: "1px solid #fde68a", borderRadius: 20, padding: "1px 6px", flexShrink: 0 }}>⚠️ review</span>
-                      }
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#16a34a", background: "#dcfce7",
+                                     border: "1px solid #86efac", borderRadius: 20,
+                                     padding: "1px 6px", flexShrink: 0 }}>✅</span>
                     </div>
-                    <div className="text-xs leading-relaxed" style={{ color: "#475569" }}>
+                    <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.5 }}>
                       {l.notes.slice(0, 80)}{l.notes.length > 80 ? "…" : ""}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+                      {new Date(l.ts).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                      &nbsp;· tap to view details
                     </div>
                   </button>
                 ))}
