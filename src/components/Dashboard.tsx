@@ -2236,6 +2236,8 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
   const [viewingLesson, setViewingLesson] = useState<LessonRecord | null>(null);
+  const [lessonHistory, setLessonHistory]     = useState<LessonRecord[]>([]);
+  const [lessonHistoryMounted, setLessonHistoryMounted] = useState(false);
 
   // Canvas height — +/- resizable
   // Default is 660 so the ephemeral REASON/ACT/LEARN sub-agent bubbles (y=545–635)
@@ -2258,6 +2260,38 @@ export default function Dashboard() {
       localStorage.setItem("sre-scenario-history", JSON.stringify(summaryHistory));
     } catch { /* quota exceeded — ignore */ }
   }, [summaryHistory, historyMounted]);
+
+  // Load lesson history from localStorage once on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sre-lesson-history");
+      if (saved) setLessonHistory(JSON.parse(saved) as LessonRecord[]);
+    } catch { /* corrupt — ignore */ }
+    setLessonHistoryMounted(true);
+  }, []);
+
+  // Persist lesson history whenever it changes
+  useEffect(() => {
+    if (!lessonHistoryMounted) return;
+    try {
+      localStorage.setItem("sre-lesson-history", JSON.stringify(lessonHistory));
+    } catch { /* quota exceeded — ignore */ }
+  }, [lessonHistory, lessonHistoryMounted]);
+
+  // Capture new lessons from SSE state into persistent lessonHistory (deduped by id)
+  const lastSeenLessonsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!state.lessons.length) return;
+    const newOnes = state.lessons.filter(l => !lastSeenLessonsRef.current.has(l.id));
+    if (!newOnes.length) return;
+    newOnes.forEach(l => lastSeenLessonsRef.current.add(l.id));
+    setLessonHistory(prev => {
+      const merged = [...newOnes, ...prev].filter(
+        (l, i, arr) => arr.findIndex(x => x.id === l.id) === i
+      );
+      return merged.slice(0, 100); // keep up to 100 lessons
+    });
+  }, [state.lessons]);
 
   // Keep a ref to the latest auditLog so the capture effect can read it
   // without needing auditLog in its dependency array (which would cause
@@ -2776,8 +2810,8 @@ export default function Dashboard() {
             <AuditLogPanel log={state.auditLog} />
           </div>
 
-          {/* Lessons learned — emerald Arctic, clickable, full history */}
-          {state.lessons.length > 0 && (
+          {/* Lessons learned — persistent history, clickable cards */}
+          {lessonHistory.length > 0 && (
             <div className="shrink-0 mt-4 pt-3" style={{ borderTop: "1px solid #dce5ef" }}>
               <div className="flex items-center gap-1.5 mb-3">
                 <span className="w-2 h-2 rounded-full" style={{ background: "#1D9E75" }} />
@@ -2785,11 +2819,11 @@ export default function Dashboard() {
                      style={{ color: "#1e3a5f", opacity: 0.7 }}>
                   Lessons Learned
                 </span>
-                <span className="text-xs font-normal ml-1" style={{ color: "#94a3b8" }}>({state.lessons.length})</span>
+                <span className="text-xs font-normal ml-1" style={{ color: "#94a3b8" }}>({lessonHistory.length})</span>
                 <span className="text-[9px] ml-auto" style={{ color: "#94a3b8" }}>click to expand</span>
               </div>
               <div className="space-y-2 overflow-y-auto" style={{ maxHeight: "260px" }}>
-                {[...state.lessons].reverse().map((l) => (
+                {lessonHistory.map((l) => (
                   <button key={l.id}
                     onClick={() => setViewingLesson(l)}
                     className="w-full text-left rounded-xl px-3 py-3 transition-all"
