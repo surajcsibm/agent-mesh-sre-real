@@ -305,11 +305,116 @@ function describeToolCall(toolCall: MCPToolCall) {
   }
 }
 
+// ── Scenario trigger reasons — shown in the approval gate ────────────────────
+
+const SCENARIO_TRIGGER_REASONS: Record<string, { title: string; conditions: string[] }> = {
+  "lag-spike": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Consumer group processing rate fell below producer write rate for a sustained period",
+      "Downstream service slowdown (DB bottleneck or GC pause) caused consumer threads to stall",
+      "Broker rebalance mid-consumption forced a pause while partitions were reassigned",
+      "Topic partition count too low for consumer group size, creating hotspot partitions",
+    ],
+  },
+  "controller-failover": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Active KRaft controller broker process crashed or became unresponsive",
+      "Network partition isolated the controller from quorum voters",
+      "JVM out-of-memory on the controller node triggered OS process kill",
+      "Rolling restart or planned maintenance caused epoch increment",
+    ],
+  },
+  "share-group": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Share group member joined or left, causing in-flight record redistribution",
+      "Consumer missed heartbeat deadline triggering group coordinator timeout",
+      "Share group queue depth exceeded configured fetch limit triggering rebalance",
+      "Broker partition leadership moved, invalidating existing share group assignments",
+    ],
+  },
+  "benign-rebalance": {
+    title: "Why this was suppressed (no action needed)",
+    conditions: [
+      "Normal partition rebalance during rolling consumer deployment — expected churn",
+      "Lag briefly rises during consumer startup before threads reach full throughput",
+      "Group coordinator election during broker maintenance looks like an outage",
+      "Short-lived network blip causes transient lag that self-resolves within seconds",
+    ],
+  },
+  "schema-mismatch": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Producer updated Avro/Protobuf schema without backward-compatible evolution",
+      "Consumer deserialization fails with SchemaParseException on new field",
+      "Schema registry compatibility mode changed from BACKWARD to NONE",
+      "Two producer versions writing incompatible schemas to the same topic simultaneously",
+    ],
+  },
+  "disk-saturation": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Log retention policy misconfigured — compacted topics accumulating without cleanup",
+      "Sudden traffic spike wrote log segments faster than disk throughput could handle",
+      "Log cleaner thread fell behind, leaving old segments undeleted",
+      "Large batch producers sending oversized messages exhausted available disk within hours",
+    ],
+  },
+  "under-replication": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Follower broker fell behind leader due to network bandwidth saturation",
+      "Broker GC pause exceeded replica.lag.time.max.ms, dropping it from ISR",
+      "Rack-aware replica placement violated with a broker failure leaving one rack under-covered",
+      "Disk I/O saturation on a follower prevented it from keeping up with replication throughput",
+    ],
+  },
+  "producer-timeout": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Broker leader election taking longer than request.timeout.ms, expiring producer ACKs",
+      "acks=all with an under-replicated partition — no acknowledgement until ISR recovers",
+      "Network congestion between producer host and broker caused ACK timeout cascade",
+      "Producer batch size too large for available broker memory, triggering request queuing",
+    ],
+  },
+  "consumer-session-timeout": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Consumer JVM GC stop-the-world pause exceeded session.timeout.ms",
+      "Application deadlock prevented the poll loop from running within max.poll.interval.ms",
+      "Network partition between consumer and broker group coordinator triggered session expiry",
+      "Consumer was processing an oversized record batch beyond the heartbeat interval",
+    ],
+  },
+  "compaction-lag": {
+    title: "Why this failure was triggered",
+    conditions: [
+      "Log cleaner thread count insufficient for the volume of compacted topics",
+      "High write throughput caused dirty ratio to spike faster than cleanup could run",
+      "Compaction I/O competing with replication I/O on the same disk controller",
+      "Large number of unique keys producing high tombstone volume, slowing cleanup passes",
+    ],
+  },
+  "partition-imbalance": {
+    title: "Why this was suppressed (no action needed)",
+    conditions: [
+      "Preferred leader election skipped after broker restart, leaving leadership uneven",
+      "Rack-aware assignment drifted after multiple broker replacements",
+      "Manual partition reassignment left leaders concentrated on fewer brokers",
+      "Auto-leader-rebalance disabled while one broker had disproportionate leadership count",
+    ],
+  },
+};
+
 // ── Approval gate ─────────────────────────────────────────────────────────────
 
-function ApprovalGate({ approvals, onDecide }: {
+function ApprovalGate({ approvals, onDecide, onClose }: {
   approvals: ApprovalRequest[];
   onDecide: (id: string, d: "approve" | "reject") => void;
+  onClose?: () => void;
 }) {
   if (!approvals.length) return null;
 
@@ -321,23 +426,72 @@ function ApprovalGate({ approvals, onDecide }: {
         return (
           <div key={a.id}
             className="bg-white border border-amber-200 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden
-                       animate-[slideUp_0.25s_ease-out]">
+                       animate-[slideUp_0.25s_ease-out] flex flex-col max-h-[90vh]">
 
             {/* Header */}
-            <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white border border-amber-200 flex items-center justify-center text-xl shadow-sm">
+            <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-center gap-3 shrink-0">
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  title="Close without deciding"
+                  style={{
+                    width:30, height:30, borderRadius:8, border:"1px solid #fcd34d",
+                    background:"#fff", cursor:"pointer", display:"flex",
+                    alignItems:"center", justifyContent:"center",
+                    fontSize:16, color:"#92400e", fontWeight:700,
+                    flexShrink:0, lineHeight:1,
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background="#fef3c7"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background="#fff"; }}
+                >✕</button>
+              )}
+              <div className="w-10 h-10 rounded-xl bg-white border border-amber-200 flex items-center justify-center text-xl shadow-sm shrink-0">
                 🔐
               </div>
               <div>
                 <h2 className="text-base font-bold text-slate-800">Policy Gate — Approval Required</h2>
                 <p className="text-xs text-amber-700 font-medium mt-0.5">
-                  This action mutates your Kafka cluster. Review carefully before approving.
+                  Review the trigger conditions below, then approve or reject.
                 </p>
               </div>
             </div>
 
-            {/* Body */}
-            <div className="px-6 py-5">
+            {/* Body — scrollable */}
+            <div className="px-6 py-5 overflow-y-auto flex-1">
+              {/* Trigger reasons */}
+              {(() => {
+                const tr = SCENARIO_TRIGGER_REASONS[a.scenarioId];
+                if (!tr) return null;
+                return (
+                  <div style={{
+                    background:"linear-gradient(135deg,#fff7ed,#fffbeb)",
+                    border:"1px solid #fed7aa", borderLeft:"4px solid #f97316",
+                    borderRadius:12, padding:"14px 16px", marginBottom:18,
+                  }}>
+                    <div style={{
+                      fontSize:10, fontWeight:800, color:"#c2410c",
+                      textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:10,
+                      display:"flex", alignItems:"center", gap:6,
+                    }}>
+                      <span style={{fontSize:13}}>⚠️</span> {tr.title}
+                    </div>
+                    <ul style={{ margin:0, padding:0, listStyle:"none", display:"flex", flexDirection:"column", gap:6 }}>
+                      {tr.conditions.map((c, i) => (
+                        <li key={i} style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
+                          <span style={{
+                            marginTop:2, width:16, height:16, borderRadius:"50%",
+                            background:"#fed7aa", color:"#c2410c",
+                            fontSize:9, fontWeight:800, display:"flex",
+                            alignItems:"center", justifyContent:"center", flexShrink:0,
+                          }}>{i + 1}</span>
+                          <span style={{ fontSize:12, color:"#7c2d12", lineHeight:1.5 }}>{c}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+
               {/* Proposed action */}
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-2xl">{desc.emoji}</span>
@@ -2001,6 +2155,7 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [approvalToast, setApprovalToast] = useState<string | null>(null);
   const approvalToastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
 
   // Canvas height — +/- resizable
   // Default is 660 so the ephemeral REASON/ACT/LEARN sub-agent bubbles (y=545–635)
@@ -2534,16 +2689,11 @@ export default function Dashboard() {
                     {String(ap.reason).slice(0,110)}{String(ap.reason).length>110?"…":""}
                   </p>
                 )}
-                <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>approve(ap.id,"approve")} style={{
-                    flex:1,padding:"6px 0",borderRadius:7,border:"none",
-                    cursor:"pointer",background:"#16a34a",color:"#fff",fontWeight:700,fontSize:11
-                  }}>✓ Approve</button>
-                  <button onClick={()=>approve(ap.id,"reject")} style={{
-                    flex:1,padding:"6px 0",borderRadius:7,border:"1px solid #e2e8f0",
-                    cursor:"pointer",background:"#fff",color:"#dc2626",fontWeight:700,fontSize:11
-                  }}>✗ Reject</button>
-                </div>
+                <button onClick={()=>setReviewingApproval(ap)} style={{
+                  width:"100%",padding:"7px 0",borderRadius:7,border:"1px solid #fcd34d",
+                  cursor:"pointer",background:"#fffbeb",color:"#92400e",fontWeight:700,fontSize:11,
+                  display:"flex",alignItems:"center",justifyContent:"center",gap:6,
+                }}>🔍 Review &amp; Decide →</button>
               </div>
             )))}
           </div>
@@ -2601,6 +2751,13 @@ export default function Dashboard() {
         </div>
       )}
       {/* <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} /> */}
+      {reviewingApproval && (
+        <ApprovalGate
+          approvals={[reviewingApproval]}
+          onDecide={(id, d) => { approve(id, d); setReviewingApproval(null); }}
+          onClose={() => setReviewingApproval(null)}
+        />
+      )}
       { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
       {viewHistorySummary && (
         <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} />
