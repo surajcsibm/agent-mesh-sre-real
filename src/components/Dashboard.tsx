@@ -1947,7 +1947,7 @@ function ClusterStatsModal({
              style={{ background: "#1e3a5f", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "#93c5fd" }}>
-              {isAiven ? "Aiven · Direct Kafka" : isReal ? "Real Cluster" : "Simulator"}
+              {isAiven ? "CFK · Confluent for Kubernetes" : isReal ? "Real Cluster" : "Simulator"}
             </div>
             <div className="text-sm font-bold text-white">Cluster Statistics</div>
           </div>
@@ -1958,7 +1958,7 @@ function ClusterStatsModal({
 
         <div className="p-5 space-y-5">
 
-          {/* ── Connection info (real/Aiven) ── */}
+          {/* ── Connection info (real/CFK) ── */}
           {isReal && kafka && (
             <section>
               <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: "#94a3b8" }}>
