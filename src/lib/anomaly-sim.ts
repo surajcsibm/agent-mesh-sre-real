@@ -174,9 +174,9 @@ const HEAL_DELAY  = 90_000;
 // scenarios cycle through across multiple SSE windows. On localhost use
 // realistic longer spacing.
 const IS_VERCEL = process.env.VERCEL === '1';
-const FIRST_DELAY  = IS_VERCEL ?  8_000 : 35_000;
-const MIN_INTERVAL = IS_VERCEL ? 15_000 : 90_000;
-const MAX_INTERVAL = IS_VERCEL ? 25_000 : 150_000;
+const FIRST_DELAY  = IS_VERCEL ? 20_000 : 35_000;
+const MIN_INTERVAL = IS_VERCEL ? 60_000 : 90_000;
+const MAX_INTERVAL = IS_VERCEL ? 90_000 : 150_000;
 const rand = () => MIN_INTERVAL + Math.floor(Math.random() * (MAX_INTERVAL - MIN_INTERVAL));
 
 function runCycle() {
