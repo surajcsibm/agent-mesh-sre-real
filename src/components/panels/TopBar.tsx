@@ -33,7 +33,7 @@ export function TopBar() {
   const isReal = mode?.mode === "real" && !!snap?.cluster.ready;
   const realPartial = mode?.mode === "real" && !snap?.cluster.ready && !!mode?.kubeAvailable;
   const kubeReady = !!mode?.kubeAvailable && !!connect?.strimzi?.present;
-  // Direct Kafka path (Aiven / RedPanda / Confluent): mode=real + bootstrap set + no k8s
+  // Direct Kafka path (CFK / RedPanda / Confluent): mode=real + bootstrap set + no k8s
   const isDirectKafka = mode?.mode === "real" && !!mode?.kafka?.bootstrapInternal && !mode?.kubeAvailable;
 
   return (
@@ -113,7 +113,7 @@ function ModeBadge({
   bootstrapHost?: string;
 }) {
   const label = mode === "real"
-    ? directKafka ? "Aiven Kafka · Connected"
+    ? directKafka ? "CFK · Connected"
     : ready ? "Real cluster"
     : partial ? "Real (provisioning)"
     : "Real (no cluster yet)"
@@ -192,11 +192,11 @@ function DirectKafkaStrip({
   const port = kafka.bootstrapInternal?.split(":")[1] ?? "";
   return (
     <>
-      <Pill icon={<Cpu size={11} />} label="Kafka" value="Aiven · SASL/SCRAM-256" tone="ok" />
+      <Pill icon={<Cpu size={11} />} label="Kafka" value="CFK · Confluent 8.2" tone="ok" />
       <Pill icon={<Database size={11} />} label="Broker" value={`${host.split(".")[0]}${port ? `:${port}` : ""}`} tone="ok" />
-      <Pill icon={<Lock size={11} />} label="TLS" value="custom CA" tone="ok" />
-      <Pill icon={<KeyRound size={11} />} label="Auth" value={kafka.username ?? "avnadmin"} tone="ok" />
-      <Pill icon={<ShieldCheck size={11} />} label="CA cert" value={kafka.hasCaCert ? "✓" : "✗"} tone={kafka.hasCaCert ? "ok" : "warn"} />
+      <Pill icon={<Lock size={11} />} label="TLS" value="none" tone="ok" />
+      <Pill icon={<KeyRound size={11} />} label="Auth" value={kafka.username || "(no auth)"} tone="ok" />
+      <Pill icon={<ShieldCheck size={11} />} label="CA cert" value={kafka.hasCaCert ? "✓" : "not needed"} tone={kafka.hasCaCert ? "ok" : "info"} />
       <Pill icon={<Activity size={11} />} label="Audit" value={`${audit} writes`} tone="info" />
       <MonitorPollPill />
     </>

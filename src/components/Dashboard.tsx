@@ -1968,9 +1968,9 @@ function ClusterStatsModal({
                 {[
                   { label: "Bootstrap Host", value: host,                                                mono: true  },
                   { label: "Port",           value: port,                                                mono: true  },
-                  { label: "SASL Mechanism", value: "SCRAM-SHA-256",                                    mono: false },
-                  { label: "Auth User",      value: kafka.username ?? "avnadmin",                       mono: true  },
-                  { label: "CA Certificate", value: kafka.hasCaCert ? "✓ Custom CA present" : "✗ None", mono: false, special: true, ok: kafka.hasCaCert },
+                  { label: "SASL Mechanism", value: kafka.username ? "SCRAM-SHA-256" : "(none)",                                    mono: false },
+                  { label: "Auth User",      value: kafka.username || "(no auth)",                       mono: true  },
+                  { label: "CA Certificate", value: kafka.hasCaCert ? "✓ Custom CA present" : "✗ Not required", mono: false, special: true, ok: kafka.hasCaCert },
                   { label: "Password",       value: kafka.hasPassword ? "✓ Set" : "✗ Not set",          mono: false, special: true, ok: kafka.hasPassword },
                 ].map((r, i, arr) => (
                   <div key={r.label}
