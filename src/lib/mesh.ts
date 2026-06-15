@@ -467,7 +467,7 @@ import("./event-bus").then(({ getEventBus }) =>
 
   if (process.env.KAFKA_MODE === "real") {
     try {
-      const { describeConsumerGroup } = await import("./aiven-admin");
+      const { describeConsumerGroup } = await import("./kafka-admin-cfk");
       const cg = await describeConsumerGroup("payments-consumer");
       realLagAfter = Math.max(0, cg.lag - 12000);
       realMembers = cg.memberCount + 2;
@@ -545,7 +545,7 @@ async function runControllerFailover() {
 
   if (process.env.KAFKA_MODE === "real") {
     try {
-      const { getServiceInfo } = await import("./aiven-admin");
+      const { getServiceInfo } = await import("./kafka-admin-cfk");
       const svc = await getServiceInfo();
       failoverDetail = `REAL: Aiven service state=${svc.state}, nodes=${svc.nodeCount}, kafka=${svc.kafkaVersion}. Epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked. No page sent.`;
       audit("tool-call", "monitor",
@@ -634,7 +634,7 @@ async function runShareGroup() {
 
   if (process.env.KAFKA_MODE === "real") {
     try {
-      const { listTopics } = await import("./aiven-admin");
+      const { listTopics } = await import("./kafka-admin-cfk");
       const topics = await listTopics();
       const hasPayments = topics.includes("demo.payments.events");
       const hasNotifications = topics.includes("ops.notifications.v1");
@@ -715,7 +715,7 @@ async function runBenignRebalance() {
 
   if (process.env.KAFKA_MODE === "real") {
     try {
-      const { listConsumerGroups } = await import("./aiven-admin");
+      const { listConsumerGroups } = await import("./kafka-admin-cfk");
       const groups = await listConsumerGroups();
       suppressDetail = `REAL: Aiven consumer groups (${groups.length} total): [${groups.slice(0, 5).join(", ")}]. KIP-848 rebalance suppression applied — no page sent.`;
       audit("tool-call", "monitor",

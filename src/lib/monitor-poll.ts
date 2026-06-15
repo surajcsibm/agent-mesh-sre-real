@@ -162,7 +162,7 @@ async function collectSnapshot(): Promise<MetricSnapshot> {
     // ── Aiven REST — disk metrics + topic sizes + CG lag from partitions ────
     try {
       const { getServiceMetrics, getClusterTopicSizes, listTopics, listSchemas } =
-        await import("./aiven-admin");
+        await import("./kafka-admin-cfk");
 
       const diskMetrics = await getServiceMetrics();
       snap.diskUsedPercent = diskMetrics.diskUsedPercent;

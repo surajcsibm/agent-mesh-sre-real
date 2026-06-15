@@ -7,7 +7,7 @@ import {
   describeTopic,
   ensureRequiredTopics,
   REQUIRED_TOPICS,
-} from "@/lib/aiven-admin";
+} from "@/lib/kafka-admin-cfk";
 
 export const dynamic = "force-dynamic";
 

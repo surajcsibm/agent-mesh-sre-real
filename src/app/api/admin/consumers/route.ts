@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/lib/runtime-mode";
-import { listConsumerGroups, describeConsumerGroup } from "@/lib/aiven-admin";
+import { listConsumerGroups, describeConsumerGroup } from "@/lib/kafka-admin-cfk";
 
 export const dynamic = "force-dynamic";
 
