@@ -96,6 +96,7 @@ export function publicView(r: RuntimeConfig = getRuntime()) {
           username: r.kafka.username,
           hasPassword: !!r.kafka.password,
           hasCaCert: !!r.kafka.caCertPem,
+          saslMechanism: r.kafka.saslMechanism,
         }
       : null,
   };

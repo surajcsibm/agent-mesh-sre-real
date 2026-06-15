@@ -307,51 +307,121 @@ function describeToolCall(toolCall: MCPToolCall) {
 
 // ── Scenario trigger reasons — shown in the approval gate ────────────────────
 
-const SCENARIO_TRIGGER_REASONS: Record<string, { title: string; reasons: [string, string] }> = {
-  "lag-spike":               { title: "Top 2 most likely triggers", reasons: [
-    "Consumer group processing rate fell below producer write rate for a sustained period.",
-    "Downstream service slowdown (DB bottleneck or GC pause) caused consumer threads to stall.",
-  ]},
-  "controller-failover":     { title: "Top 2 most likely triggers", reasons: [
-    "Active KRaft controller broker process crashed or became unresponsive.",
-    "Network partition isolated the controller from quorum voters.",
-  ]},
-  "share-group":             { title: "Top 2 most likely triggers", reasons: [
-    "Share group member joined or left, causing in-flight record redistribution.",
-    "Consumer missed heartbeat deadline triggering group coordinator timeout.",
-  ]},
-  "benign-rebalance":        { title: "Top 2 reasons this was suppressed", reasons: [
-    "Normal partition rebalance during rolling consumer deployment — expected churn.",
-    "Lag briefly rises during consumer startup before threads reach full throughput.",
-  ]},
-  "schema-mismatch":         { title: "Top 2 most likely triggers", reasons: [
-    "Producer updated Avro/Protobuf schema without backward-compatible evolution.",
-    "Consumer deserialization failing with SchemaParseException on new field.",
-  ]},
-  "disk-saturation":         { title: "Top 2 most likely triggers", reasons: [
-    "Log retention policy misconfigured — compacted topics accumulating without cleanup.",
-    "Sudden traffic spike wrote log segments faster than disk throughput could handle.",
-  ]},
-  "under-replication":       { title: "Top 2 most likely triggers", reasons: [
-    "Follower broker fell behind leader due to network bandwidth saturation.",
-    "Broker GC pause exceeded replica.lag.time.max.ms, dropping it from ISR.",
-  ]},
-  "producer-timeout":        { title: "Top 2 most likely triggers", reasons: [
-    "Broker leader election exceeded request.timeout.ms, expiring in-flight producer ACKs.",
-    "acks=all with an under-replicated partition — no acknowledgement until ISR recovers.",
-  ]},
-  "consumer-session-timeout":{ title: "Top 2 most likely triggers", reasons: [
-    "Consumer JVM GC stop-the-world pause exceeded session.timeout.ms.",
-    "Application deadlock prevented the poll loop from running within max.poll.interval.ms.",
-  ]},
-  "compaction-lag":          { title: "Top 2 most likely triggers", reasons: [
-    "Log cleaner thread count insufficient for the volume of compacted topics.",
-    "High write throughput caused dirty ratio to spike faster than cleanup could run.",
-  ]},
-  "partition-imbalance":     { title: "Top 2 reasons this was suppressed", reasons: [
-    "Preferred leader election skipped after broker restart — imbalance is benign.",
-    "Rack-aware assignment drifted after multiple broker replacements, no action needed.",
-  ]},
+// Label → scenario ID mapping (EmailSummaryData uses scenarioLabel, not scenarioId)
+const SCENARIO_LABEL_TO_ID: Record<string, string> = {
+  "Consumer Lag Spike": "lag-spike",
+  "KRaft Controller Failover": "controller-failover",
+  "Share Group Rebalance": "share-group",
+  "False-Positive Suppression": "benign-rebalance",
+  "Schema Registry Mismatch": "schema-mismatch",
+  "Broker Disk Saturation": "disk-saturation",
+  "Under-Replicated Partitions": "under-replication",
+  "Producer Timeout Storm": "producer-timeout",
+  "Consumer Session Timeout": "consumer-session-timeout",
+  "Log Compaction Lag": "compaction-lag",
+  "Partition Imbalance": "partition-imbalance",
+};
+
+const SCENARIO_TRIGGER_REASONS: Record<string, { mostLikely: string; allReasons: string[] }> = {
+  "lag-spike": {
+    mostLikely: "Consumer group processing rate fell below producer write rate for a sustained period.",
+    allReasons: [
+      "Consumer group processing rate fell below producer write rate for a sustained period.",
+      "Downstream service slowdown (DB bottleneck or GC pause) caused consumer threads to stall.",
+      "Broker rebalance mid-consumption forced a pause while partitions were reassigned.",
+      "Topic partition count too low for the consumer group size, creating hotspot partitions.",
+    ],
+  },
+  "controller-failover": {
+    mostLikely: "Active KRaft controller broker process crashed or became unresponsive.",
+    allReasons: [
+      "Active KRaft controller broker process crashed or became unresponsive.",
+      "Network partition isolated the controller from quorum voters.",
+      "JVM out-of-memory on the controller node triggered OS process kill.",
+      "Rolling restart or planned maintenance caused epoch increment.",
+    ],
+  },
+  "share-group": {
+    mostLikely: "Share group member joined or left, causing in-flight record redistribution.",
+    allReasons: [
+      "Share group member joined or left, causing in-flight record redistribution.",
+      "Consumer missed heartbeat deadline triggering group coordinator timeout.",
+      "Share group queue depth exceeded configured fetch limit triggering rebalance.",
+      "Broker partition leadership moved, invalidating existing share group assignments.",
+    ],
+  },
+  "benign-rebalance": {
+    mostLikely: "Normal partition rebalance during rolling consumer deployment — expected churn.",
+    allReasons: [
+      "Normal partition rebalance during rolling consumer deployment — expected churn.",
+      "Lag briefly rises during consumer startup before threads reach full throughput.",
+      "Group coordinator election during broker maintenance looks like an outage.",
+      "Short-lived network blip causes transient lag that self-resolves within seconds.",
+    ],
+  },
+  "schema-mismatch": {
+    mostLikely: "Producer updated Avro/Protobuf schema without backward-compatible evolution.",
+    allReasons: [
+      "Producer updated Avro/Protobuf schema without backward-compatible evolution.",
+      "Consumer deserialization failing with SchemaParseException on new field.",
+      "Schema registry compatibility mode changed from BACKWARD to NONE.",
+      "Two producer versions writing incompatible schemas to the same topic simultaneously.",
+    ],
+  },
+  "disk-saturation": {
+    mostLikely: "Log retention policy misconfigured — compacted topics accumulating without cleanup.",
+    allReasons: [
+      "Log retention policy misconfigured — compacted topics accumulating without cleanup.",
+      "Sudden traffic spike wrote log segments faster than disk throughput could handle.",
+      "Log cleaner thread fell behind, leaving old segments undeleted.",
+      "Large batch producers sending oversized messages exhausted available disk within hours.",
+    ],
+  },
+  "under-replication": {
+    mostLikely: "Follower broker fell behind leader due to network bandwidth saturation.",
+    allReasons: [
+      "Follower broker fell behind leader due to network bandwidth saturation.",
+      "Broker GC pause exceeded replica.lag.time.max.ms, dropping it from ISR.",
+      "Rack-aware replica placement violated with a broker failure leaving one rack under-covered.",
+      "Disk I/O saturation on a follower prevented it from keeping up with replication throughput.",
+    ],
+  },
+  "producer-timeout": {
+    mostLikely: "Broker leader election exceeded request.timeout.ms, expiring in-flight producer ACKs.",
+    allReasons: [
+      "Broker leader election exceeded request.timeout.ms, expiring in-flight producer ACKs.",
+      "acks=all with an under-replicated partition — no acknowledgement until ISR recovers.",
+      "Network congestion between producer host and broker caused ACK timeout cascade.",
+      "Producer batch size too large for available broker memory, triggering request queuing.",
+    ],
+  },
+  "consumer-session-timeout": {
+    mostLikely: "Consumer JVM GC stop-the-world pause exceeded session.timeout.ms.",
+    allReasons: [
+      "Consumer JVM GC stop-the-world pause exceeded session.timeout.ms.",
+      "Application deadlock prevented the poll loop from running within max.poll.interval.ms.",
+      "Network partition between consumer and broker group coordinator triggered session expiry.",
+      "Consumer was processing an oversized record batch beyond the heartbeat interval.",
+    ],
+  },
+  "compaction-lag": {
+    mostLikely: "Log cleaner thread count insufficient for the volume of compacted topics.",
+    allReasons: [
+      "Log cleaner thread count insufficient for the volume of compacted topics.",
+      "High write throughput caused dirty ratio to spike faster than cleanup could run.",
+      "Compaction I/O competing with replication I/O on the same disk controller.",
+      "Large number of unique keys producing high tombstone volume, slowing cleanup passes.",
+    ],
+  },
+  "partition-imbalance": {
+    mostLikely: "Preferred leader election skipped after broker restart — imbalance is benign.",
+    allReasons: [
+      "Preferred leader election skipped after broker restart — imbalance is benign.",
+      "Rack-aware assignment drifted after multiple broker replacements.",
+      "Manual partition reassignment left leaders concentrated on fewer brokers.",
+      "Auto-leader-rebalance disabled while one broker had disproportionate leadership count.",
+    ],
+  },
 };
 
 // ── Approval gate ─────────────────────────────────────────────────────────────
@@ -420,17 +490,56 @@ function ApprovalGate({ approvals, onDecide, onClose }: {
                     }}>
                       <span style={{fontSize:13}}>⚠️</span> {tr.title}
                     </div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
-                      {tr.reasons.map((r, i) => (
-                        <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
-                          <span style={{
-                            marginTop:2, width:18, height:18, borderRadius:"50%",
-                            background:"#fed7aa", color:"#c2410c",
-                            fontSize:9, fontWeight:800, display:"flex",
-                            alignItems:"center", justifyContent:"center", flexShrink:0,
-                          }}>{i + 1}</span>
-                          <span style={{ fontSize:12, color:"#7c2d12", lineHeight:1.6, fontWeight:500 }}>{r}</span>
+                    <div style={{ marginBottom:18 }}>
+                    {/* Most probable cause */}
+                    <div style={{
+                      background:"linear-gradient(135deg,#fff1f2,#fff7ed)",
+                      border:"1px solid #fca5a5", borderLeft:"4px solid #dc2626",
+                      borderRadius:10, padding:"12px 14px", marginBottom:10,
+                      display:"flex", alignItems:"flex-start", gap:10,
+                    }}>
+                      <span style={{ fontSize:18, flexShrink:0 }}>🎯</span>
+                      <div>
+                        <div style={{ fontSize:10, fontWeight:800, color:"#dc2626",
+                          textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:4 }}>
+                          Most Probable Cause
                         </div>
+                        <div style={{ fontSize:13, color:"#7f1d1d", fontWeight:600, lineHeight:1.6 }}>
+                          {tr.mostLikely}
+                        </div>
+                      </div>
+                    </div>
+                    {/* All possible reasons */}
+                    <div style={{
+                      background:"linear-gradient(135deg,#fff7ed,#fffbeb)",
+                      border:"1px solid #fed7aa", borderLeft:"4px solid #f97316",
+                      borderRadius:10, padding:"12px 14px",
+                    }}>
+                      <div style={{ fontSize:10, fontWeight:800, color:"#c2410c",
+                        textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:10,
+                        display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{fontSize:13}}>⚠️</span> All possible trigger reasons
+                      </div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                        {tr.allReasons.map((r, i) => (
+                          <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:9 }}>
+                            <span style={{
+                              marginTop:2, width:18, height:18, borderRadius:"50%",
+                              background: r === tr.mostLikely ? "#dc2626" : "#fed7aa",
+                              color: r === tr.mostLikely ? "#fff" : "#c2410c",
+                              fontSize:9, fontWeight:800, display:"flex",
+                              alignItems:"center", justifyContent:"center", flexShrink:0,
+                            }}>{i + 1}</span>
+                            <span style={{
+                              fontSize:12, lineHeight:1.6,
+                              fontWeight: r === tr.mostLikely ? 700 : 500,
+                              color: r === tr.mostLikely ? "#7f1d1d" : "#92400e",
+                            }}>{r}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                       ))}
                     </div>
                   </div>
@@ -703,29 +812,28 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             </table>
           </div>
 
-          {/* ── Trigger reasons ── */}
+          {/* ── Trigger reasons (scenario history popup) ── */}
           {(() => {
-            const tr = SCENARIO_TRIGGER_REASONS[data.scenarioId];
+            const sid = SCENARIO_LABEL_TO_ID[data.scenarioLabel] ?? data.scenarioLabel;
+            const tr = SCENARIO_TRIGGER_REASONS[sid];
             if (!tr) return null;
             return (
               <div style={{ marginTop: 18 }}>
                 {/* Most probable cause */}
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
-                                letterSpacing: "0.8px", marginBottom: 8 }}>🎯 Most Probable Root Cause</div>
-                  <div style={{
-                    background: "linear-gradient(135deg,#fff1f2,#fff7ed)",
-                    border: "1px solid #fca5a5", borderLeft: "4px solid #dc2626",
-                    borderRadius: 8, padding: "12px 14px",
-                    display: "flex", alignItems: "flex-start", gap: 10,
-                  }}>
-                    <span style={{ fontSize: 18, flexShrink: 0 }}>🎯</span>
-                    <div style={{ fontSize: 13, color: "#7f1d1d", fontWeight: 600, lineHeight: 1.6 }}>
-                      {tr.mostLikely}
-                    </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
+                              letterSpacing: "0.8px", marginBottom: 8 }}>🎯 Most Probable Root Cause</div>
+                <div style={{
+                  background: "linear-gradient(135deg,#fff1f2,#fff7ed)",
+                  border: "1px solid #fca5a5", borderLeft: "4px solid #dc2626",
+                  borderRadius: 8, padding: "12px 14px", marginBottom: 10,
+                  display: "flex", alignItems: "flex-start", gap: 10,
+                }}>
+                  <span style={{ fontSize: 18, flexShrink: 0 }}>🎯</span>
+                  <div style={{ fontSize: 13, color: "#7f1d1d", fontWeight: 600, lineHeight: 1.6 }}>
+                    {tr.mostLikely}
                   </div>
                 </div>
-                {/* All possible root cause reasons */}
+                {/* All possible root causes */}
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
                               letterSpacing: "0.8px", marginBottom: 8 }}>⚠️ All Possible Root Cause Reasons</div>
                 <div style={{
@@ -2021,7 +2129,7 @@ function ClusterStatsModal({
                 {[
                   { label: "Bootstrap Host", value: host,                                                mono: true  },
                   { label: "Port",           value: port,                                                mono: true  },
-                  { label: "SASL Mechanism", value: kafka.username ? "SCRAM-SHA-256" : "(none)",                                    mono: false },
+                  { label: "SASL Mechanism", value: kafka.saslMechanism || (kafka.username ? "scram-sha-256" : "(none)"),                                    mono: false },
                   { label: "Auth User",      value: kafka.username || "(no auth)",                       mono: true  },
                   { label: "CA Certificate", value: kafka.hasCaCert ? "✓ Custom CA present" : "✗ Not required", mono: false, special: true, ok: kafka.hasCaCert },
                   { label: "Password",       value: kafka.hasPassword ? "✓ Set" : "✗ Not set",          mono: false, special: true, ok: kafka.hasPassword },

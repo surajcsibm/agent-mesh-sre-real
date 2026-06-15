@@ -60,6 +60,7 @@ export type ModeInfo = {
     username?: string;
     hasPassword: boolean;
     hasCaCert: boolean;
+    saslMechanism?: string;
   } | null;
 };
 
