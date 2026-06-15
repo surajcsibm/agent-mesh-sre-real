@@ -175,8 +175,8 @@ const HEAL_DELAY  = 90_000;
 // realistic longer spacing.
 const IS_VERCEL = process.env.VERCEL === '1';
 const FIRST_DELAY  = IS_VERCEL ? 20_000 : 35_000;
-const MIN_INTERVAL = IS_VERCEL ? 60_000 : 90_000;
-const MAX_INTERVAL = IS_VERCEL ? 90_000 : 150_000;
+const MIN_INTERVAL = IS_VERCEL ? 30_000 : 90_000;
+const MAX_INTERVAL = IS_VERCEL ? 40_000 : 150_000;
 const rand = () => MIN_INTERVAL + Math.floor(Math.random() * (MAX_INTERVAL - MIN_INTERVAL));
 
 function runCycle() {
