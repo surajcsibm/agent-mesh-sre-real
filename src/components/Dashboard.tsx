@@ -1926,7 +1926,7 @@ function ClusterStatsModal({
   const isAiven    = isReal && !!kafka?.bootstrapInternal && !modeInfo?.kubeAvailable;
   const host       = kafka?.bootstrapInternal?.split(":")[0] ?? "—";
   const port       = kafka?.bootstrapInternal?.split(":")[1] ?? "—";
-  const hostShort  = host === "—" ? "—" : host.split(".").slice(0, 2).join(".") + "…";
+  const hostShort  = host;
 
   const topics = broker ? Object.entries(broker.topics) : [];
   const groups = broker ? Object.entries(broker.consumerGroups) : [];
