@@ -119,7 +119,7 @@ function ModeBadge({
     : "Real (no cluster yet)"
     : "Simulator";
   const sub = mode === "real"
-    ? directKafka ? (bootstrapHost ?? "Direct Kafka · SASL/SCRAM-256")
+    ? directKafka ? (bootstrapHost ?? "CFK · Confluent for Kubernetes")
     : ready ? "Strimzi-managed Kafka 4.2 KRaft"
     : "Awaiting Kafka CR Ready"
     : kubeReady ? "Kube + Strimzi reachable — switch in Setup" : "In-process Kafka simulator";
