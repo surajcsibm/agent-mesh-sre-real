@@ -309,15 +309,28 @@ function describeToolCall(toolCall: MCPToolCall) {
 
 const SCENARIO_LABEL_TO_ID: Record<string, string> = {
   "Consumer Lag Spike": "lag-spike",
+  "Lag Spike": "lag-spike",
   "KRaft Controller Failover": "controller-failover",
+  "Controller Failover": "controller-failover",
+  "KRaft Failover": "controller-failover",
   "Share Group Rebalance": "share-group",
+  "Share Group": "share-group",
   "False-Positive Suppression": "benign-rebalance",
+  "False Positive": "benign-rebalance",
+  "Benign Rebalance": "benign-rebalance",
   "Schema Registry Mismatch": "schema-mismatch",
+  "Schema Mismatch": "schema-mismatch",
   "Broker Disk Saturation": "disk-saturation",
+  "Disk Saturation": "disk-saturation",
   "Under-Replicated Partitions": "under-replication",
+  "Under Replication": "under-replication",
+  "Under-Replication": "under-replication",
   "Producer Timeout Storm": "producer-timeout",
+  "Producer Timeout": "producer-timeout",
   "Consumer Session Timeout": "consumer-session-timeout",
+  "Session Timeout": "consumer-session-timeout",
   "Log Compaction Lag": "compaction-lag",
+  "Compaction Lag": "compaction-lag",
   "Partition Imbalance": "partition-imbalance",
 };
 
