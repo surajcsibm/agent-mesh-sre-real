@@ -2966,6 +2966,8 @@ export default function Dashboard() {
       {viewHistorySummary && (
         <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
       )}
+      {/* DEBUG */}
+      {reviewingApproval && <div style={{position:"fixed",top:0,left:0,right:0,zIndex:99999,background:"red",color:"white",padding:20,fontSize:20}}>APPROVAL GATE OPEN: {reviewingApproval.scenarioId}</div>}
       {reviewingApproval && (
         <ApprovalGate
           approvals={[reviewingApproval]}
