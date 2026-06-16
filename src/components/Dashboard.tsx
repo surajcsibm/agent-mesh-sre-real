@@ -2169,11 +2169,6 @@ function ClusterStatsModal({
 
 export default function Dashboard() {
   const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction, triggerTopicHeal } = useMeshStream();
-  const allPendingApprovals = [
-    ...localPendingApprovals.filter(l => !state.pendingApprovals.find(s => s.id === l.id)),
-    ...state.pendingApprovals,
-  ];
-
   const phase = state.mralPhase ?? "idle";
 
   // Cluster polling — populates useClusterStore with real Aiven connection details
@@ -2294,6 +2289,10 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
   const [localPendingApprovals, setLocalPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const allPendingApprovals = [
+    ...localPendingApprovals.filter(l => !state.pendingApprovals.find(s => s.id === l.id)),
+    ...state.pendingApprovals,
+  ];
   const [viewingLesson, setViewingLesson] = useState<LessonRecord | null>(null);
   const [lessonHistory, setLessonHistory]     = useState<LessonRecord[]>([]);
   const [lessonHistoryMounted, setLessonHistoryMounted] = useState(false);
