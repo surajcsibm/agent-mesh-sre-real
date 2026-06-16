@@ -2289,6 +2289,7 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
   const [localPendingApprovals, setLocalPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [simPaused, setSimPaused] = useState(false);
   const allPendingApprovals = [
     ...localPendingApprovals.filter(l => !state.pendingApprovals.find(s => s.id === l.id)),
     ...state.pendingApprovals,
@@ -2360,6 +2361,11 @@ export default function Dashboard() {
     window.addEventListener("open-approval-review", handler);
     return () => window.removeEventListener("open-approval-review", handler);
   }, []);
+
+  // Sync pause state to window so useMeshStream can check it
+  React.useEffect(() => {
+    (window as unknown as Record<string, unknown>).__simPaused = simPaused;
+  }, [simPaused]);
 
   // Escape key closes all open modals
   useEffect(() => {
@@ -2562,6 +2568,27 @@ export default function Dashboard() {
               Common Scenarios
             </div>
             <div className="space-y-2">
+              {/* Pause/Resume auto-trigger */}
+              <div style={{
+                display:"flex", alignItems:"center", justifyContent:"space-between",
+                padding:"8px 12px", marginBottom:8,
+                background: simPaused ? "#fff7ed" : "#f0fdf4",
+                border: `1px solid ${simPaused ? "#fed7aa" : "#bbf7d0"}`,
+                borderRadius:10,
+              }}>
+                <div style={{ fontSize:11, fontWeight:700, color: simPaused ? "#c2410c" : "#15803d" }}>
+                  {simPaused ? "⏸ Auto-trigger paused" : "▶ Auto-trigger active"}
+                </div>
+                <button onClick={() => setSimPaused(p => !p)} style={{
+                  fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:6,
+                  border:`1px solid ${simPaused ? "#f97316" : "#16a34a"}`,
+                  background: simPaused ? "#fff7ed" : "#f0fdf4",
+                  color: simPaused ? "#c2410c" : "#15803d", cursor:"pointer",
+                }}>
+                  {simPaused ? "▶ Resume" : "⏸ Pause"}
+                </button>
+              </div>
+
               {PINNED_SCENARIOS.map((s) => (
                 <button
                   key={s.id}
