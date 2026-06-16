@@ -626,7 +626,7 @@ function DataRow({ label, children, last = false }: { label: string; children: R
   );
 }
 
-function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSummaryData; onClose: () => void; onSendForApproval?: (a: ApprovalRequest) => void }) {
+function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { data: EmailSummaryData; onClose: () => void; onSendForApproval?: (a: ApprovalRequest) => void; scenarioId?: string }) {
   const isRejected = !data.approved;
   const ts = new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
   const confidence = data.reasoning ? `${Math.round(data.reasoning.confidence * 100)}%` : "—";
@@ -828,7 +828,7 @@ function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSum
         <div style={{ padding: "16px 24px", borderTop: "1px solid #e2e8f0", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <button
             onClick={() => {
-              const sid = SCENARIO_LABEL_TO_ID[data.scenarioLabel] ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+              const sid = scenarioId ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
               const synth: ApprovalRequest = {
                 id: "modal-" + Date.now(),
                 ts: data.ts ?? Date.now(),
@@ -845,12 +845,7 @@ function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSum
                   params: { name: sid, arguments: {} }
                 },
               };
-              console.log("onSendForApproval value:", onSendForApproval, "synth:", synth.scenarioId);
-              if (onSendForApproval) {
-                onSendForApproval(synth);
-              } else {
-                console.error("onSendForApproval is undefined!");
-              }
+              if (onSendForApproval) onSendForApproval(synth);
               onClose();
             }}
             style={{ width: "100%", padding: "12px 0", borderRadius: 10,
@@ -2969,7 +2964,7 @@ export default function Dashboard() {
         <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
       )}
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary.scenarioLabel] ?? viewHistorySummary.scenarioLabel.toLowerCase().replace(/\s+/g,"-")} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
       )}
       {/* DEBUG */}
       {reviewingApproval && <div style={{position:"fixed",top:0,left:0,right:0,zIndex:99999,background:"red",color:"white",padding:20,fontSize:20}}>APPROVAL GATE OPEN: {reviewingApproval.scenarioId}</div>}
