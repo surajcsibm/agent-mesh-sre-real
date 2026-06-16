@@ -2392,6 +2392,9 @@ export default function Dashboard() {
       setSelectedTopic(null);
       setPendingDelete(null);
       setCopyTemplate(null);
+      setBrokerOpen(false);
+      setClusterStatsOpen(false);
+      setCreateModalOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
