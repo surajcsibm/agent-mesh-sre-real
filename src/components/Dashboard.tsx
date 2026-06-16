@@ -821,8 +821,7 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             </div>
           )}
 
-          {(data as EmailSummaryData & { status?: string }).status === "awaiting-approval" && (
-            <button
+          <button
               onClick={() => {
                 const sid = SCENARIO_LABEL_TO_ID[data.scenarioLabel] ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
                 const synth: ApprovalRequest = {
@@ -841,15 +840,13 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
                     params: { name: sid, arguments: {} }
                   },
                 };
-                onClose();
-                (window as Record<string, unknown>).__pendingReview = synth;
                 window.dispatchEvent(new CustomEvent("open-approval-review", { detail: synth }));
+                onClose();
               }}
               className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
               style={{ background: "#fffbeb", border: "2px solid #f59e0b", color: "#92400e" }}>
               ⏳ Send for Approval →
             </button>
-          )}
           <button onClick={onClose}
             className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
             style={{ background: isRejected ? "#1e293b" : "#2563eb", color: "#fff" }}>
