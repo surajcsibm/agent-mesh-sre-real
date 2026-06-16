@@ -2964,10 +2964,10 @@ export default function Dashboard() {
         <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
       )}
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary.scenarioLabel] ?? viewHistorySummary.scenarioLabel.toLowerCase().replace(/\s+/g,"-")} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary?.scenarioLabel ?? ""] ?? ""} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
       )}
       {/* DEBUG */}
-      {reviewingApproval && <div style={{position:"fixed",top:0,left:0,right:0,zIndex:99999,background:"red",color:"white",padding:20,fontSize:20}}>APPROVAL GATE OPEN: {reviewingApproval.scenarioId}</div>}
+
       {reviewingApproval && (
         <ApprovalGate
           approvals={[reviewingApproval]}
