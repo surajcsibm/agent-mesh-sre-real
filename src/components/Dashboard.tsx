@@ -840,8 +840,8 @@ function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSum
                     params: { name: sid, arguments: {} }
                   },
                 };
-                onSendForApproval?.(synth);
                 onClose();
+                setTimeout(() => onSendForApproval?.(synth), 50);
               }}
               className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
               style={{ background: "#fffbeb", border: "2px solid #f59e0b", color: "#92400e" }}>
