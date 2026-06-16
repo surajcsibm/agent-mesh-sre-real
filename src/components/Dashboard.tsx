@@ -2959,19 +2959,19 @@ export default function Dashboard() {
       {/* ── Approval gate toast ── */}
 
       {/* <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} /> */}
+      { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
+      {viewingLesson && (
+        <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
+      )}
+      {viewHistorySummary && (
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
+      )}
       {reviewingApproval && (
         <ApprovalGate
           approvals={[reviewingApproval]}
           onDecide={(id, d) => { approve(id, d); setReviewingApproval(null); }}
           onClose={() => setReviewingApproval(null)}
         />
-      )}
-      { /* ScenarioEndModal suppressed — review via Scenario History bar */ }
-      {viewingLesson && (
-        <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
-      )}
-      {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={(a) => { setViewHistorySummary(null); setTimeout(() => setReviewingApproval(a), 0); }} />
       )}
       {selectedTopic && !pendingDelete && (
         <TopicModal
