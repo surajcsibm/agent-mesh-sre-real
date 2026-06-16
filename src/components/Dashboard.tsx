@@ -845,7 +845,12 @@ function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSum
                   params: { name: sid, arguments: {} }
                 },
               };
-              onSendForApproval?.(synth);
+              console.log("onSendForApproval value:", onSendForApproval, "synth:", synth.scenarioId);
+              if (onSendForApproval) {
+                onSendForApproval(synth);
+              } else {
+                console.error("onSendForApproval is undefined!");
+              }
               onClose();
             }}
             style={{ width: "100%", padding: "12px 0", borderRadius: 10,
