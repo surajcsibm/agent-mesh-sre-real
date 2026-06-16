@@ -1903,12 +1903,28 @@ function ScenarioHistoryBar({ history, onView }: {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    // Find the matching pending approval and open the review gate
-                    const match = state.pendingApprovals.find(
-                      a => SCENARIO_LABEL_TO_ID[h.scenarioLabel] === a.scenarioId
-                        || h.scenarioLabel.toLowerCase().includes(a.scenarioId.replace(/-/g," "))
+                    const scenarioId = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+                    // First try live pendingApprovals
+                    const live = state.pendingApprovals.find(
+                      a => a.scenarioId === scenarioId || a.scenarioId.includes(scenarioId.split("-")[0])
                     );
-                    if (match) setReviewingApproval(match);
+                    if (live) { setReviewingApproval(live); return; }
+                    // Synthesise from history entry so Review always works
+                    const synth: ApprovalRequest = {
+                      id: `hist-${i}`,
+                      ts: h.ts ?? Date.now(),
+                      createdAt: h.ts ?? Date.now(),
+                      agent: "monitor" as const,
+                      proposedBy: "monitor",
+                      scenarioId,
+                      reason: h.reasoning?.rationale ?? "Approval required for this infra-mutating action.",
+                      status: "pending",
+                      toolCall: h.reasoning?.proposedToolCall ?? {
+                        jsonrpc: "2.0" as const, id: `synth-${i}`, method: "tools/call" as const,
+                        params: { name: scenarioId, arguments: {} }
+                      },
+                    };
+                    setReviewingApproval(synth);
                   }}
                   style={{
                     fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6,
