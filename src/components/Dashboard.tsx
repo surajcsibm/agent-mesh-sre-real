@@ -655,6 +655,17 @@ function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { da
           <div style={{ fontSize: 12, color: "#bfdbfe", marginTop: 5 }}>
             Scenario: <strong style={{ color: "#fff" }}>{data.scenarioLabel}</strong>
             &nbsp;·&nbsp;{ts}
+            {(data as EmailSummaryData & { triggerSource?: string }).triggerSource === "manual" ? (
+              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#1d4ed8",
+                background: "rgba(239,246,255,0.9)", border: "1px solid #bfdbfe", borderRadius: 10, padding: "2px 8px" }}>
+                👤 Manually triggered
+              </span>
+            ) : (
+              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#e2e8f0",
+                background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 10, padding: "2px 8px" }}>
+                🤖 Auto-triggered
+              </span>
+            )}
             {isRejected && (
               <span style={{ marginLeft: 8, background: "#fca5a5", color: "#7f1d1d", padding: "2px 8px",
                              borderRadius: 20, fontSize: 11, fontWeight: 700 }}>REJECTED</span>
@@ -1907,6 +1918,13 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
                   {new Date(h.completedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                 </span>
               )}
+              {(h as EmailSummaryData & { triggerSource?: string }).triggerSource === "manual" ? (
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff",
+                  border: "1px solid #bfdbfe", borderRadius: 10, padding: "1px 6px", flexShrink: 0 }}>👤 Manual</span>
+              ) : (
+                <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", background: "#f3f4f6",
+                  border: "1px solid #e5e7eb", borderRadius: 10, padding: "1px 6px", flexShrink: 0 }}>🤖 Auto</span>
+              )}
               {/* Confidence */}
               {confidence !== null && (
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#475569", flexShrink: 0 }}>
@@ -2036,7 +2054,7 @@ function ClusterStatsModal({
                   { label: "Bootstrap Host", value: host,                                                mono: true  },
                   { label: "Internal (K8s)", value: "kafka.confluent.svc.cluster.local:9092",              mono: true  },
                   { label: "Port",           value: port,                                                mono: true  },
-                  { label: "SASL Mechanism", value: kafka.username ? "SCRAM-SHA-256" : "(none)",                                    mono: false },
+                  { label: "SASL Mechanism", value: kafka.saslMechanism || (kafka.username ? "scram-sha-256" : "(none)"),                                    mono: false },
                   { label: "Auth User",      value: kafka.username || "(no auth)",                       mono: true  },
                   { label: "CA Certificate", value: kafka.hasCaCert ? "✓ Custom CA present" : "✗ Not required", mono: false, special: true, ok: kafka.hasCaCert },
                   { label: "Password",       value: kafka.hasPassword ? "✓ Set" : "✗ Not set",          mono: false, special: true, ok: kafka.hasPassword },
@@ -2264,7 +2282,9 @@ export default function Dashboard() {
   const [topicsVisible, setTopicsVisible] = useState(20);
 
   // Wrapper around trigger() that auto-upserts scenario-relevant topics first
+  const lastManualTriggerRef = React.useRef<string | null>(null);
   const handleTrigger = (scenarioId: string) => {
+    lastManualTriggerRef.current = scenarioId;
     const autoTopics = SCENARIO_AUTO_TOPICS[scenarioId];
     if (autoTopics && autoTopics.length > 0) {
       setTopics(prev => {
@@ -2431,8 +2451,13 @@ export default function Dashboard() {
             })),
           };
 
+    // Stamp trigger source
+    const scenarioKey = SCENARIO_LABEL_TO_ID[hydrated.scenarioLabel] ?? hydrated.scenarioLabel;
+    const isManual = lastManualTriggerRef.current === scenarioKey;
+    if (isManual) lastManualTriggerRef.current = null;
+    const stamped = { ...hydrated, triggerSource: isManual ? "manual" : "auto" } as EmailSummaryData & { triggerSource: string };
     // Prepend — no dedup so every run (even same scenario) gets its own entry
-    setSummaryHistory(prev => [hydrated, ...prev].slice(0, 30));
+    setSummaryHistory(prev => [stamped, ...prev].slice(0, 30));
   }, [state.emailSummary]);
 
   const handleTopicSave = (updated: KafkaTopic) => {
@@ -2985,7 +3010,6 @@ export default function Dashboard() {
       </div>
 
       {/* Overlays */}
-      {console.log("[Dashboard] pendingApprovals:", state.pendingApprovals)}
       {/* ── Approval gate toast ── */}
 
       {/* <ApprovalGate approvals={state.pendingApprovals} onDecide={approve} /> */}
