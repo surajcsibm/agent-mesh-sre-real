@@ -307,6 +307,7 @@ function describeToolCall(toolCall: MCPToolCall) {
 
 // ── Scenario trigger reasons — shown in the approval gate ────────────────────
 
+const SCENARIO_LABEL_TO_ID: Record<string, string> = {"Consumer Lag Spike":"lag-spike","KRaft Controller Failover":"controller-failover","Share Group Rebalance":"share-group","False-Positive Suppression":"benign-rebalance","Schema Registry Mismatch":"schema-mismatch","Broker Disk Saturation":"disk-saturation","Under-Replicated Partitions":"under-replication","Producer Timeout Storm":"producer-timeout","Consumer Session Timeout":"consumer-session-timeout","Log Compaction Lag":"compaction-lag","Partition Imbalance":"partition-imbalance"};
 const SCENARIO_TRIGGER_REASONS: Record<string, { title: string; reasons: [string, string] }> = {
   "lag-spike":               { title: "Top 2 most likely triggers", reasons: [
     "Consumer group processing rate fell below producer write rate for a sustained period.",
@@ -2253,7 +2254,7 @@ export default function Dashboard() {
   // Always start with [] so SSR and client hydration match, then load after mount.
   const [summaryHistory, setSummaryHistory]   = useState<EmailSummaryData[]>([]);
   const [simPaused, setSimPaused]             = useState(false);
-  const [pendingManualTrigger, setPendingManualTrigger] = useState<string | null>(null);
+
   const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
