@@ -606,6 +606,20 @@ function DataRow({ label, children, last = false }: { label: string; children: R
   );
 }
 
+const SCENARIO_TOOL_CALLS: Record<string, { name: string; arguments: Record<string, unknown> }> = {
+  "lag-spike":               { name: "kafka.scaleConsumers",        arguments: { group: "payments-consumer-group", delta: 3, reason: "Consumer lag exceeded 10,000 messages." } },
+  "share-group":             { name: "kafka.checkpointShareGroup",  arguments: { shareGroupId: "payments-share-group", checkpointOffset: 4821, delta: 2 } },
+  "schema-mismatch":         { name: "kafka.updateSchemaCompatibility", arguments: { subject: "payments.events-value", compatibility: "BACKWARD_TRANSITIVE" } },
+  "under-replication":       { name: "kafka.reassignPartitions",    arguments: { topic: "ops.actions.audit.v1", fromBroker: "broker-3", toBroker: "broker-1", partitionCount: 4 } },
+  "controller-failover":     { name: "kafka.acknowledgeFailover",   arguments: { newControllerId: "broker-2", epoch: 15 } },
+  "benign-rebalance":        { name: "kafka.suppressRebalancePage", arguments: { consumerGroup: "payments-consumer-group", rebalanceState: "Rebalancing", lagObserved: 120 } },
+  "disk-saturation":         { name: "kafka.adjustRetention",       arguments: { topic: "ops.kafka.metrics.v1", retentionMs: 86400000 } },
+  "producer-timeout":        { name: "kafka.tuneProducerConfig",    arguments: { batchSize: "2MB", lingerMs: 20 } },
+  "consumer-session-timeout":{ name: "kafka.adjustSessionTimeout",  arguments: { consumerGroup: "invoice-consumer-group", sessionTimeoutMs: 45000 } },
+  "compaction-lag":          { name: "kafka.tuneCompaction",        arguments: { topic: "ops.lessons.v1", cleanerThreads: 4 } },
+  "partition-imbalance":     { name: "kafka.suppressImbalancePage", arguments: { imbalanceScore: 0.18, threshold: 0.25 } },
+};
+
 function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { data: EmailSummaryData; onClose: () => void; onSendForApproval?: (a: ApprovalRequest) => void; scenarioId?: string }) {
   const isRejected = !data.approved;
   const ts = new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
@@ -822,7 +836,7 @@ function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { da
                   jsonrpc: "2.0" as const,
                   id: "modal-" + Date.now(),
                   method: "tools/call" as const,
-                  params: { name: sid, arguments: {} }
+                  params: SCENARIO_TOOL_CALLS[sid] ?? { name: sid, arguments: {} }
                 },
               };
               if (onSendForApproval) onSendForApproval(synth);
@@ -1935,7 +1949,7 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
                       status: "pending",
                       toolCall: h.reasoning?.proposedToolCall ?? {
                         jsonrpc: "2.0" as const, id: `synth-${i}`, method: "tools/call" as const,
-                        params: { name: scenarioId, arguments: {} }
+                        params: SCENARIO_TOOL_CALLS[scenarioId] ?? { name: scenarioId, arguments: {} }
                       },
                     };
                     onReview(synth);
