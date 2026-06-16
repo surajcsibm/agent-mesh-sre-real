@@ -821,8 +821,37 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             </div>
           )}
 
+          {(data as EmailSummaryData & { status?: string }).status === "awaiting-approval" && (
+            <button
+              onClick={() => {
+                const sid = SCENARIO_LABEL_TO_ID[data.scenarioLabel] ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+                const synth: ApprovalRequest = {
+                  id: "modal-" + Date.now(),
+                  ts: data.ts ?? Date.now(),
+                  createdAt: data.ts ?? Date.now(),
+                  agent: "monitor" as const,
+                  proposedBy: "monitor",
+                  scenarioId: sid,
+                  reason: data.reasoning?.rationale ?? "Approval required for this infra-mutating action.",
+                  status: "pending",
+                  toolCall: data.reasoning?.proposedToolCall ?? {
+                    jsonrpc: "2.0" as const,
+                    id: "modal-" + Date.now(),
+                    method: "tools/call" as const,
+                    params: { name: sid, arguments: {} }
+                  },
+                };
+                onClose();
+                (window as Record<string, unknown>).__pendingReview = synth;
+                window.dispatchEvent(new CustomEvent("open-approval-review", { detail: synth }));
+              }}
+              className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
+              style={{ background: "#fffbeb", border: "2px solid #f59e0b", color: "#92400e" }}>
+              ⏳ Send for Approval →
+            </button>
+          )}
           <button onClick={onClose}
-            className="mt-5 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
+            className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
             style={{ background: isRejected ? "#1e293b" : "#2563eb", color: "#fff" }}>
             {isRejected ? "Understood" : "Got it"}
           </button>
@@ -1819,9 +1848,11 @@ function inferColor(label: string): string {
   return "#64748b";
 }
 
-function ScenarioHistoryBar({ history, onView }: {
+function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
   history: EmailSummaryData[];
   onView: (d: EmailSummaryData) => void;
+  onReview: (a: ApprovalRequest) => void;
+  pendingApprovals: ApprovalRequest[];
 }) {
   if (!history.length) return null;
 
@@ -1905,10 +1936,10 @@ function ScenarioHistoryBar({ history, onView }: {
                     e.stopPropagation();
                     const scenarioId = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
                     // First try live pendingApprovals
-                    const live = state.pendingApprovals.find(
+                    const live = pendingApprovals.find(
                       a => a.scenarioId === scenarioId || a.scenarioId.includes(scenarioId.split("-")[0])
                     );
-                    if (live) { setReviewingApproval(live); return; }
+                    if (live) { onReview(live); return; }
                     // Synthesise from history entry so Review always works
                     const synth: ApprovalRequest = {
                       id: `hist-${i}`,
@@ -1924,7 +1955,7 @@ function ScenarioHistoryBar({ history, onView }: {
                         params: { name: scenarioId, arguments: {} }
                       },
                     };
-                    setReviewingApproval(synth);
+                    onReview(synth);
                   }}
                   style={{
                     fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6,
@@ -2331,6 +2362,16 @@ export default function Dashboard() {
       return merged.slice(0, 100); // keep up to 100 lessons
     });
   }, [state.lessons]);
+
+  // Handle "Send for Approval" from ScenarioEndModal
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const approval = (e as CustomEvent).detail as ApprovalRequest;
+      if (approval) setReviewingApproval(approval);
+    };
+    window.addEventListener("open-approval-review", handler);
+    return () => window.removeEventListener("open-approval-review", handler);
+  }, []);
 
   // Escape key closes all open modals
   useEffect(() => {
@@ -2784,7 +2825,7 @@ export default function Dashboard() {
             ) : summaryHistory.length > 0 ? (
               /* ── History list after scenario ends ── */
               <div className="overflow-y-auto flex-1">
-                <ScenarioHistoryBar history={summaryHistory} onView={setViewHistorySummary} />
+                <ScenarioHistoryBar history={summaryHistory} onView={setViewHistorySummary} onReview={setReviewingApproval} pendingApprovals={state.pendingApprovals} />
               </div>
             ) : (
               /* ── Empty state ── */
