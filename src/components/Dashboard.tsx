@@ -475,7 +475,7 @@ function ApprovalGate({ approvals, onDecide, onClose }: {
                       <div>
                         <div style={{ fontSize:10, fontWeight:800, color:"#dc2626",
                           textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:4 }}>
-                          Most Probable Cause
+                          Root Cause
                         </div>
                         <div style={{ fontSize:13, color:"#7f1d1d", fontWeight:600, lineHeight:1.6 }}>
                           {tr.mostLikely}
@@ -800,7 +800,7 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
             return (
               <div style={{ marginTop: 18 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
-                              letterSpacing: "0.8px", marginBottom: 8 }}>🎯 Most Probable Root Cause</div>
+                              letterSpacing: "0.8px", marginBottom: 8 }}>🎯 Root Cause</div>
                 <div style={{
                   background: "linear-gradient(135deg,#fff1f2,#fff7ed)",
                   border: "1px solid #fca5a5", borderLeft: "4px solid #dc2626",
@@ -813,7 +813,7 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
                   </div>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
-                              letterSpacing: "0.8px", marginBottom: 8 }}>⚠️ All Possible Root Cause Reasons</div>
+                              letterSpacing: "0.8px", marginBottom: 8 }}>⚠️ Available Root Causes</div>
                 <div style={{
                   background: "linear-gradient(135deg,#fff7ed,#fffbeb)",
                   border: "1px solid #fed7aa", borderLeft: "4px solid #f97316",
