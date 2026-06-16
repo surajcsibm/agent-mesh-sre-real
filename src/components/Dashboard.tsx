@@ -2164,7 +2164,6 @@ function ClusterStatsModal({
                 {[
                   { label: "Bootstrap Host", value: host,                                                mono: true  },
                   { label: "Internal (K8s)", value: "kafka.confluent.svc.cluster.local:9092",              mono: true  },
-                  { label: "Internal (K8s)", value: "kafka.confluent.svc.cluster.local:9092",              mono: true  },
                   { label: "Port",           value: port,                                                mono: true  },
                   { label: "SASL Mechanism", value: kafka.username ? "SCRAM-SHA-256" : "(none)",                                    mono: false },
                   { label: "Auth User",      value: kafka.username || "(no auth)",                       mono: true  },
