@@ -2971,7 +2971,7 @@ export default function Dashboard() {
         <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
       )}
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={setReviewingApproval} />
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={(a) => { setViewHistorySummary(null); setTimeout(() => setReviewingApproval(a), 0); }} />
       )}
       {selectedTopic && !pendingDelete && (
         <TopicModal
