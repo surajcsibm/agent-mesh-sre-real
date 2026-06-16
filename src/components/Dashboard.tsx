@@ -626,7 +626,7 @@ function DataRow({ label, children, last = false }: { label: string; children: R
   );
 }
 
-function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: () => void }) {
+function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSummaryData; onClose: () => void; onSendForApproval?: (a: ApprovalRequest) => void }) {
   const isRejected = !data.approved;
   const ts = new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
   const confidence = data.reasoning ? `${Math.round(data.reasoning.confidence * 100)}%` : "—";
@@ -840,7 +840,7 @@ function ScenarioEndModal({ data, onClose }: { data: EmailSummaryData; onClose: 
                     params: { name: sid, arguments: {} }
                   },
                 };
-                window.dispatchEvent(new CustomEvent("open-approval-review", { detail: synth }));
+                onSendForApproval?.(synth);
                 onClose();
               }}
               className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
@@ -2965,7 +2965,7 @@ export default function Dashboard() {
         <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
       )}
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} />
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} onSendForApproval={setReviewingApproval} />
       )}
       {selectedTopic && !pendingDelete && (
         <TopicModal
