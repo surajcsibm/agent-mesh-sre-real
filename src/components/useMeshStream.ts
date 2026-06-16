@@ -130,7 +130,7 @@ export function useMeshStream() {
             // Autonomous Monitor triggered a scenario — run the full client-side MRAL.
             // runClientScenario handles: animation, approval gates, notifications, email.
             const sid = (event as { type: "auto-trigger-scenario"; scenarioId: string }).scenarioId;
-            if (sid) runClientScenario(sid as ScenarioKey, dispatch as (a: SimAction) => void);
+            if (sid && !(window as unknown as Record<string, unknown>).__simPaused) runClientScenario(sid as ScenarioKey, dispatch as (a: SimAction) => void);
             break;
           }
           case "auto-topic-heal": {
