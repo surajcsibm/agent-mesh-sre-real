@@ -2169,6 +2169,11 @@ function ClusterStatsModal({
 
 export default function Dashboard() {
   const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction, triggerTopicHeal } = useMeshStream();
+  const allPendingApprovals = [
+    ...localPendingApprovals.filter(l => !state.pendingApprovals.find(s => s.id === l.id)),
+    ...state.pendingApprovals,
+  ];
+
   const phase = state.mralPhase ?? "idle";
 
   // Cluster polling — populates useClusterStore with real Aiven connection details
@@ -2288,6 +2293,7 @@ export default function Dashboard() {
   const [historyMounted, setHistoryMounted]   = useState(false);
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
+  const [localPendingApprovals, setLocalPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [viewingLesson, setViewingLesson] = useState<LessonRecord | null>(null);
   const [lessonHistory, setLessonHistory]     = useState<LessonRecord[]>([]);
   const [lessonHistoryMounted, setLessonHistoryMounted] = useState(false);
@@ -2808,7 +2814,7 @@ export default function Dashboard() {
             ) : summaryHistory.length > 0 ? (
               /* ── History list after scenario ends ── */
               <div className="overflow-y-auto flex-1">
-                <ScenarioHistoryBar history={summaryHistory} onView={setViewHistorySummary} onReview={setReviewingApproval} pendingApprovals={state.pendingApprovals} />
+                <ScenarioHistoryBar history={summaryHistory} onView={setViewHistorySummary} onReview={(a) => { setLocalPendingApprovals(prev => [...prev.filter(p => p.id !== a.id), a]); setReviewingApproval(a); }} pendingApprovals={allPendingApprovals} />
               </div>
             ) : (
               /* ── Empty state ── */
@@ -2835,24 +2841,24 @@ export default function Dashboard() {
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <span style={{
                 width:8,height:8,borderRadius:"50%",display:"inline-block",
-                background:state.pendingApprovals.length>0?"#f59e0b":"#22d3ee",
+                background:allPendingApprovals.length>0?"#f59e0b":"#22d3ee",
               }}/>
               <span style={{fontSize:11,fontWeight:800,color:"#1e3a5f",
                 letterSpacing:"0.06em",textTransform:"uppercase"}}>
                 Pending Approvals
               </span>
-              {state.pendingApprovals.length>0&&(
+              {allPendingApprovals.length>0&&(
                 <span style={{marginLeft:4,background:"#fef3c7",color:"#92400e",
                   borderRadius:20,padding:"1px 8px",fontWeight:700,fontSize:10,
-                  border:"1px solid #fcd34d"}}>{state.pendingApprovals.length}</span>
+                  border:"1px solid #fcd34d"}}>{allPendingApprovals.length}</span>
               )}
             </div>
-            {state.pendingApprovals.length===0?(
+            {allPendingApprovals.length===0?(
               <div style={{textAlign:"center",padding:"8px 0"}}>
                 <p style={{fontSize:12,color:"#94a3b8"}}>✓ No pending approvals</p>
                 <p style={{fontSize:10,color:"#b0bec8",marginTop:2}}>Approval gates appear here automatically</p>
               </div>
-            ):(state.pendingApprovals.map((ap,idx)=>(
+            ):(allPendingApprovals.map((ap,idx)=>(
               <div key={ap.id} style={{
                 border:`1px solid ${idx===0?"#fcd34d":"#e2e8f0"}`,
                 borderLeft:`3px solid ${idx===0?"#f59e0b":"#94a3b8"}`,
@@ -2944,14 +2950,14 @@ export default function Dashboard() {
         <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
       )}
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary?.scenarioLabel ?? ""] ?? ""} onSendForApproval={(a) => { setViewHistorySummary(null); setReviewingApproval(a); }} />
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary?.scenarioLabel ?? ""] ?? ""} onSendForApproval={(a) => { setLocalPendingApprovals(prev => [...prev.filter(p => p.id !== a.id), a]); setViewHistorySummary(null); setReviewingApproval(a); }} />
       )}
       {/* DEBUG */}
 
       {reviewingApproval && (
         <ApprovalGate
           approvals={[reviewingApproval]}
-          onDecide={(id, d) => { approve(id, d); setReviewingApproval(null); }}
+          onDecide={(id, d) => { approve(id, d); setReviewingApproval(null); setLocalPendingApprovals(prev => prev.filter(p => p.id !== id)); }}
           onClose={() => setReviewingApproval(null)}
         />
       )}
