@@ -2034,6 +2034,7 @@ function ClusterStatsModal({
               <div className="rounded-xl border overflow-hidden" style={{ borderColor: "#dce5ef" }}>
                 {[
                   { label: "Bootstrap Host", value: host,                                                mono: true  },
+                  { label: "Internal (K8s)", value: "kafka.confluent.svc.cluster.local:9092",              mono: true  },
                   { label: "Port",           value: port,                                                mono: true  },
                   { label: "SASL Mechanism", value: kafka.username ? "SCRAM-SHA-256" : "(none)",                                    mono: false },
                   { label: "Auth User",      value: kafka.username || "(no auth)",                       mono: true  },
@@ -2997,7 +2998,21 @@ export default function Dashboard() {
       {reviewingApproval && (
         <ApprovalGate
           approvals={[reviewingApproval]}
-          onDecide={(id, d) => { approve(id, d); setReviewingApproval(null); setLocalPendingApprovals(prev => prev.filter(p => p.id !== id)); }}
+          onDecide={(id, d) => {
+            approve(id, d);
+            setReviewingApproval(null);
+            setLocalPendingApprovals(prev => prev.filter(p => p.id !== id));
+            // Update summaryHistory entry to reflect the decision
+            setSummaryHistory(prev => prev.map(h => {
+              const sid = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+              const matchesId = id.startsWith("modal-") || id.startsWith("hist-");
+              if (!matchesId) return h;
+              const hSid = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? "";
+              const approvalSid = localPendingApprovals.find(p => p.id === id)?.scenarioId ?? "";
+              if (hSid !== approvalSid && sid !== approvalSid) return h;
+              return { ...h, approved: d === "approve", status: d === "approve" ? "approved" : "rejected" } as typeof h;
+            }));
+          }}
           onClose={() => setReviewingApproval(null)}
         />
       )}
