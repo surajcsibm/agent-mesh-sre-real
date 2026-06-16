@@ -821,43 +821,45 @@ function ScenarioEndModal({ data, onClose, onSendForApproval }: { data: EmailSum
             </div>
           )}
 
+        </div>
+        </div>{/* end scrollable body */}
+
+        {/* Sticky footer — always visible */}
+        <div style={{ padding: "16px 24px", borderTop: "1px solid #e2e8f0", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <button
-              onClick={() => {
-                const sid = SCENARIO_LABEL_TO_ID[data.scenarioLabel] ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
-                const synth: ApprovalRequest = {
+            onClick={() => {
+              const sid = SCENARIO_LABEL_TO_ID[data.scenarioLabel] ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+              const synth: ApprovalRequest = {
+                id: "modal-" + Date.now(),
+                ts: data.ts ?? Date.now(),
+                createdAt: data.ts ?? Date.now(),
+                agent: "monitor" as const,
+                proposedBy: "monitor",
+                scenarioId: sid,
+                reason: data.reasoning?.rationale ?? "Approval required for this infra-mutating action.",
+                status: "pending",
+                toolCall: data.reasoning?.proposedToolCall ?? {
+                  jsonrpc: "2.0" as const,
                   id: "modal-" + Date.now(),
-                  ts: data.ts ?? Date.now(),
-                  createdAt: data.ts ?? Date.now(),
-                  agent: "monitor" as const,
-                  proposedBy: "monitor",
-                  scenarioId: sid,
-                  reason: data.reasoning?.rationale ?? "Approval required for this infra-mutating action.",
-                  status: "pending",
-                  toolCall: data.reasoning?.proposedToolCall ?? {
-                    jsonrpc: "2.0" as const,
-                    id: "modal-" + Date.now(),
-                    method: "tools/call" as const,
-                    params: { name: sid, arguments: {} }
-                  },
-                };
-                onClose();
-                setTimeout(() => {
-                  console.log("Send for Approval fired", synth, "onSendForApproval:", typeof onSendForApproval);
-                  alert("Firing: " + synth.scenarioId);
-                  onSendForApproval?.(synth);
-                }, 50);
-              }}
-              className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
-              style={{ background: "#fffbeb", border: "2px solid #f59e0b", color: "#92400e" }}>
-              ⏳ Send for Approval →
-            </button>
+                  method: "tools/call" as const,
+                  params: { name: sid, arguments: {} }
+                },
+              };
+              onSendForApproval?.(synth);
+              onClose();
+            }}
+            style={{ width: "100%", padding: "12px 0", borderRadius: 10,
+              border: "2px solid #f59e0b", background: "#fffbeb",
+              color: "#92400e", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            ⏳ Send for Approval →
+          </button>
           <button onClick={onClose}
-            className="mt-3 w-full py-3 rounded-xl font-bold text-sm transition-colors shadow-sm"
-            style={{ background: isRejected ? "#1e293b" : "#2563eb", color: "#fff" }}>
+            style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
+              background: isRejected ? "#1e293b" : "#2563eb", color: "#fff",
+              fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
             {isRejected ? "Understood" : "Got it"}
           </button>
         </div>
-        </div>{/* end scrollable body */}
       </div>
     </div>
   );
