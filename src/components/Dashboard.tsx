@@ -721,6 +721,44 @@ function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { da
             </table>
           </div>
 
+          {/* ── Trigger reasons ── */}
+          {(() => {
+            const sid = scenarioId ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+            const tr = SCENARIO_TRIGGER_REASONS[sid];
+            if (!tr) return null;
+            return (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
+                              letterSpacing: "0.8px", marginBottom: 8 }}>🎯 Root Cause</div>
+                <div style={{ background: "linear-gradient(135deg,#fff1f2,#fff7ed)", border: "1px solid #fca5a5",
+                  borderLeft: "4px solid #dc2626", borderRadius: 8, padding: "12px 14px", marginBottom: 10,
+                  display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <span style={{ fontSize: 18, flexShrink: 0 }}>🎯</span>
+                  <div style={{ fontSize: 13, color: "#7f1d1d", fontWeight: 600, lineHeight: 1.6 }}>{tr.mostLikely}</div>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
+                              letterSpacing: "0.8px", marginBottom: 8 }}>⚠️ Available Root Causes</div>
+                <div style={{ background: "linear-gradient(135deg,#fff7ed,#fffbeb)", border: "1px solid #fed7aa",
+                  borderLeft: "4px solid #f97316", borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    {tr.allReasons.map((r, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+                        <span style={{ marginTop: 2, width: 18, height: 18, borderRadius: "50%",
+                          background: r === tr.mostLikely ? "#dc2626" : "#fed7aa",
+                          color: r === tr.mostLikely ? "#fff" : "#c2410c",
+                          fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center",
+                          justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                        <span style={{ fontSize: 12, lineHeight: 1.6,
+                          fontWeight: r === tr.mostLikely ? 700 : 500,
+                          color: r === tr.mostLikely ? "#7f1d1d" : "#92400e" }}>{r}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* ── Act ── */}
           <div style={{ marginTop: 18 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", textTransform: "uppercase",
