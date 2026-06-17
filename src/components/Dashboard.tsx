@@ -868,7 +868,8 @@ function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { da
             }}
             style={{ width: "100%", padding: "12px 0", borderRadius: 10,
               border: "2px solid #f59e0b", background: "#fffbeb",
-              color: "#92400e", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              color: "#92400e", fontWeight: 700, fontSize: 13, cursor: "pointer",
+              display: (!data.approved && (data.action?.toLowerCase().includes("awaiting") || data.action?.toLowerCase().includes("approval"))) ? "block" : "none" }}>
             ⏳ Send for Approval →
           </button>
           <button onClick={onClose}
