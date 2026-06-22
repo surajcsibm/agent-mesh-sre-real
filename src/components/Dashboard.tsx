@@ -2394,7 +2394,12 @@ export default function Dashboard() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("sre-scenario-history");
-      if (saved) setSummaryHistory(JSON.parse(saved) as EmailSummaryData[]);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as EmailSummaryData[];
+          setSummaryHistory(parsed.filter((h) => h && h.scenarioId));
+        } catch { localStorage.removeItem("sre-scenario-history"); }
+      }
     } catch { /* corrupt data — ignore */ }
     setHistoryMounted(true);
   }, []); // runs once on mount
