@@ -2752,15 +2752,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Incident queue — warning yellow */}
-          {state.incidentQueueDepth > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-              <div className="text-xs font-bold text-amber-700 mb-1">⚠ Incident Queue</div>
-              <div className="text-2xl font-black text-amber-600">{state.incidentQueueDepth}</div>
-              <div className="text-[10px] text-amber-500">pending on ops.incidents.v1</div>
-            </div>
-          )}
-
           {/* Kafka Topics panel */}
           <TopicsPanel
             monDet={det}
@@ -2960,6 +2951,16 @@ export default function Dashboard() {
         {/* Right sidebar — audit log */}
         <aside className="w-80 shrink-0 flex flex-col p-4 overflow-hidden"
                style={{ background: "#f8fafc", borderLeft: "1px solid #dce5ef" }}>
+          {/* ── Incident Queue — bottom of right panel ── */}
+          {state.incidentQueueDepth > 0 && (
+            <div className="mb-3 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
+              <div>
+                <div className="text-xs font-bold text-amber-700">⚠ Incident Queue</div>
+                <div className="text-[10px] text-amber-500">pending on ops.incidents.v1</div>
+              </div>
+              <div className="ml-auto text-2xl font-black text-amber-600">{state.incidentQueueDepth}</div>
+            </div>
+          )}
           {/* ── Pending Approvals panel (always visible) ── */}
           <div id="pending-approvals-panel" style={{
             marginBottom:12, paddingBottom:12, borderBottom:"1px solid #e2e8f0",
