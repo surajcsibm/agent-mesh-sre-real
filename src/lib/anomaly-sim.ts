@@ -38,7 +38,7 @@ interface Anomaly {
 
 function setSignal(id: string, ts?: number | null) {
   patchBrokerState((b) => {
-    const rec = b as Record<string, unknown>;
+    const rec = b as unknown as Record<string, unknown>;
     if (!rec.signalledScenarios) rec.signalledScenarios = {};
     const sigs = rec.signalledScenarios as Record<string, number>;
     if (ts === null) delete sigs[id];

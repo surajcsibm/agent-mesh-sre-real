@@ -47,7 +47,7 @@ export interface EmailSummaryData {
   reasoning?: {
     rootCause: string;
     confidence: number;
-    kafkaFeature: string;
+    kafkaFeatureCited: string;
     rationale: string;
     lessonsCited?: string[];
   };
@@ -59,6 +59,14 @@ export interface EmailSummaryData {
   itsmTicket?: string;
   /** Key events captured during the scenario — shown in popup and email */
   liveEvents?: LiveFeedEvent[];
+  /** Unix ms timestamp when the scenario completed */
+  completedAt?: number;
+  /** Alias for completedAt — used in history bar display */
+  timestamp?: number;
+  /** Approval/rejection status for history badge */
+  status?: "resolved" | "approved" | "rejected" | "awaiting" | "awaiting-approval";
+  /** Trigger source — manual operator click or autonomous SSE trigger */
+  triggerSource?: "manual" | "auto";
 }
 
 export type SimAction =
@@ -72,6 +80,7 @@ export type SimAction =
   | { type: "lesson"; record: LessonRecord }
   | { type: "connected"; value: boolean }
   | { type: "emailSummary"; data: EmailSummaryData | null }
+  | { type: "add_pending_approval"; payload: import("./types").ApprovalRequest }
 
 interface SimStatePayload {
   agents: AgentState[];
@@ -347,7 +356,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
       completedAt: Date.now(),
     } });
     _globalPendingApprovals.push(approval);
-    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+    dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
     evt("approval", "monitor", "Awaiting approval: kafka.scaleConsumers(payments-consumer, +2 replicas)");
     toast(dispatch, "⏳ Approval required: kafka.scaleConsumers — check the approval panel", "warning");
 
@@ -356,7 +365,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         // ── APPROVED PATH ──────────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
@@ -401,7 +410,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
             approved: true,
             reasoning: {
               rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
-              confidence: 0.94, kafkaFeature: "KIP-848 Share Groups",
+              confidence: 0.94, kafkaFeatureCited: "KIP-848 Share Groups",
               rationale: "Lag growth 420 msg/s exceeded SLO. Downstream DB bottleneck stalled consumer threads; insufficient partition count created hotspots. Added 2 consumers — lag drained in ~10s.",
               lessonsCited: ["lesson-003"],
             },
@@ -440,7 +449,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
           approved: false,
           reasoning: {
             rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
-            confidence: 0.94, kafkaFeature: "KIP-848 Share Groups",
+            confidence: 0.94, kafkaFeatureCited: "KIP-848 Share Groups",
             rationale: "Lag growth 420 msg/s exceeded SLO (150 msg/s). Cause: broker rebalance mid-consumption paused processing. Operator rejected scale action — no cluster changes made.",
             lessonsCited: ["lesson-003"],
           },
@@ -496,7 +505,7 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
         approvedBy: "system",
         reasoning: {
           rootCause: "KRaft controller epoch incremented: broker-1 → broker-2 (epoch 14→15) — active controller process became unresponsive",
-          confidence: 0.99, kafkaFeature: "KRaft Consensus Protocol",
+          confidence: 0.99, kafkaFeatureCited: "KRaft Consensus Protocol",
           rationale: "Controller failover detected via epoch change. Possible causes: controller JVM OOM, network partition isolating quorum voters, or planned rolling restart. Election completed in 220ms — no partition reassignment required. Cluster healthy.",
         },
         lesson: { notes: "KRaft failover handled automatically. No consumer impact. Election latency within SLO." },
@@ -577,14 +586,14 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
       completedAt: Date.now(),
     } });
     _globalPendingApprovals.push(approval);
-    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+    dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
     toast(dispatch, "⏳ Approval required: kafka.checkpointShareGroup — check the approval panel", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved: boolean) => {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         // ── APPROVED PATH ──────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
@@ -612,7 +621,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
             approvedBy: "operator",
             reasoning: {
               rootCause: "KIP-932 share group rebalance detected on payments-share-group (600 msgs behind)",
-              confidence: 0.91, kafkaFeature: "KIP-932 Share Groups",
+              confidence: 0.91, kafkaFeatureCited: "KIP-932 Share Groups",
               rationale: "Consumer heartbeat deadline missed, triggering group coordinator timeout. Share group queue depth exceeded fetch limit. Offset checkpoint applied — duplicate delivery prevented during member join/leave transition.",
             },
             lesson: { notes: "Share group checkpoint prevented duplicate message delivery during rebalance." },
@@ -679,7 +688,7 @@ function runPartitionImbalance(dispatch: DispatchFn): () => void {
         approvedBy: "system",
         reasoning: {
           rootCause: "Partition leader imbalance detected: broker-0 carrying 60% of load — preferred leader election skipped after broker restart",
-          confidence: 0.88, kafkaFeature: "KIP-848 Cooperative Rebalancing",
+          confidence: 0.88, kafkaFeatureCited: "KIP-848 Cooperative Rebalancing",
           rationale: "Partition leader imbalance after broker restart. Auto-leader-rebalance temporarily disabled during rolling upgrade — imbalance is self-correcting. Rack-aware assignment drift is benign until next preferred leader election. Suppressing alert to prevent false escalation.",
         },
         lesson: { notes: "Partition rebalance was self-correcting. No manual intervention needed." },
@@ -755,7 +764,7 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
         approvedBy: "system",
         reasoning: {
           rootCause: "False positive: KIP-848 cooperative rebalance during rolling deployment — lag within tolerance",
-          confidence: 0.97, kafkaFeature: "KIP-848 Cooperative Rebalancing",
+          confidence: 0.97, kafkaFeatureCited: "KIP-848 Cooperative Rebalancing",
           rationale: "Lag 120 msgs is within cooperative rebalance tolerance (< 300 msgs). Consumer startup transient — threads have not yet reached full throughput. Group coordinator election during maintenance looks like outage but self-resolves. Suppressing page — not a real incident.",
         },
         lesson: { notes: "False-positive suppression worked correctly. Rebalance lag < 300 msgs is within tolerance." },
@@ -791,7 +800,7 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Schema Registry version conflict: producer deployed Avro v2 schema without BACKWARD_TRANSITIVE mode — consumer deserialization failing with SchemaParseException", kafkaFeature: "Schema Registry", confidence: 0.93,
+      lastReasoning: { rootCause: "Schema Registry version conflict: producer deployed Avro v2 schema without BACKWARD_TRANSITIVE mode — consumer deserialization failing with SchemaParseException", kafkaFeatureCited: "Schema Registry", confidence: 0.93,
         rationale: "Producer updated Avro schema without backward-compatible evolution. Consumer deserialization fails with SchemaParseException on new fields. Schema registry compatibility mode was not enforced (BACKWARD → NONE). Two producer versions may be writing incompatible schemas to the same topic simultaneously. Updating compatibility mode to BACKWARD_TRANSITIVE and hot-redeploying consumers with dual-read support." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(LAG), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 2 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Deserialization exception rate: 340/min on payment-processor group. Schema id=12 expected, id=15 received. BACKWARD compatibility broken.", "reasoning") });
@@ -826,14 +835,14 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
       completedAt: Date.now(),
     } });
     _globalPendingApprovals.push(approval);
-    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+    dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
     toast(dispatch, "⏳ Schema update approval required", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved) => {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
@@ -859,7 +868,7 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
           dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Schema Mismatch Resolved", message: "✅ Schema v2 BACKWARD_TRANSITIVE applied — consumers healthy, lag 8400→0", scenarioId: "schema-mismatch" } });
           sendEmail(dispatch, "schema-mismatch", "Schema Registry Mismatch", LAG, 0, "kafka.updateSchemaCompatibility(BACKWARD_TRANSITIVE)", {
             approved: true, approvedBy: "operator",
-            reasoning: { rootCause: "Avro schema v2 deployed without BACKWARD_TRANSITIVE — consumers failing on payments.transactions.v1; schema registry compatibility mode was NONE", confidence: 0.93, kafkaFeature: "Schema Registry", rationale: "Re-registered v2 schema in BACKWARD_TRANSITIVE mode; consumers hot-redeployed with dual-read support." },
+            reasoning: { rootCause: "Avro schema v2 deployed without BACKWARD_TRANSITIVE — consumers failing on payments.transactions.v1; schema registry compatibility mode was NONE", confidence: 0.93, kafkaFeatureCited: "Schema Registry", rationale: "Re-registered v2 schema in BACKWARD_TRANSITIVE mode; consumers hot-redeployed with dual-read support." },
             lesson: { notes: "Always register new Avro schemas in BACKWARD_TRANSITIVE mode before deploying producers. Gate producer releases on schema compatibility check." },
             slackMessage: "✅ Schema mismatch resolved on payments.transactions.v1 — lag 8400→0",
             itsmTicket: `INC-${Date.now().toString().slice(-5)} — Schema Registry Mismatch`,
@@ -907,7 +916,7 @@ function runDiskSaturation(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Broker disk saturation: log cleaner thread fell behind — compacted topics accumulating undeleted segments on broker-2", kafkaFeature: "Log Compaction", confidence: 0.91,
+      lastReasoning: { rootCause: "Broker disk saturation: log cleaner thread fell behind — compacted topics accumulating undeleted segments on broker-2", kafkaFeatureCited: "Log Compaction", confidence: 0.91,
         rationale: "Log retention policy misconfigured — compacted topics accumulating without cleanup. Sudden traffic spike wrote log segments faster than disk throughput could handle. log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1 (target 0.5). Large batch producers sending oversized messages exhausted available disk — 12GB uncompacted segments accumulated in last 6h. Auto-remediation triggered." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(0), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Root cause: log.cleaner.threads=1 saturated. Dirty ratio 0.78 on invoices.created.v1 (threshold 0.5). 12GB uncompacted in 6h.", "reasoning") });
@@ -943,7 +952,7 @@ function runDiskSaturation(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #sre-infra: disk saturation resolved. ITSM INC auto-closed.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Disk Saturation Resolved", message: "✅ Broker-2 disk: 92.4%→81.2% · compaction threads ×4 · headroom restored", scenarioId: "disk-saturation" } });
     sendEmail(dispatch, "disk-saturation", "Broker Disk Saturation", 0, 0, "kafka.updateBrokerConfig + kafka.forceCompact", {
-      reasoning: { rootCause: "log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1", confidence: 0.91, kafkaFeature: "Log Compaction", rationale: "Increased cleaner threads to 4, forced compaction. Disk 92.4%→81.2% in 8 min." },
+      reasoning: { rootCause: "log.cleaner.threads=1 saturated; dirty ratio 0.78 on invoices.created.v1", confidence: 0.91, kafkaFeatureCited: "Log Compaction", rationale: "Increased cleaner threads to 4, forced compaction. Disk 92.4%→81.2% in 8 min." },
       lesson: { notes: "Set log.retention.bytes with 20% headroom. Alert at dirty-ratio > 0.6. Use 2+ cleaner threads on high-volume topics." },
       slackMessage: "✅ Broker-2 disk saturation resolved — 92.4%→81.2%",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Broker Disk Saturation`,
@@ -985,7 +994,7 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
   t(2200, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Under-replicated partitions: broker-3 GC pause exceeded replica.lag.time.max.ms — dropped from ISR, minISR=2 violated on payments.settlements.v1", kafkaFeature: "KRaft ISR Management", confidence: 0.97,
+      lastReasoning: { rootCause: "Under-replicated partitions: broker-3 GC pause exceeded replica.lag.time.max.ms — dropped from ISR, minISR=2 violated on payments.settlements.v1", kafkaFeatureCited: "KRaft ISR Management", confidence: 0.97,
         rationale: "Broker-3 GC pause exceeded replica.lag.time.max.ms causing it to be dropped from ISR. Disk I/O saturation on follower prevented replication throughput. Rack-aware replica placement violated with this broker failure — one rack now under-covered. ISR dropped to 1/3 on payments.settlements.v1. Producers receiving NotEnoughReplicasException. Partition reassignment required to restore durability." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(LAG), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 3 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Broker-3 OOM. ISR: 3→1 on payments.settlements.v1 (all 4 partitions). Producers blocked on acks=all. 18,900 msg backlog.", "reasoning") });
@@ -1020,14 +1029,14 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
       completedAt: Date.now(),
     } });
     _globalPendingApprovals.push(approval);
-    dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+    dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
     toast(dispatch, "⏳ Partition reassignment approval required", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved) => {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
@@ -1053,7 +1062,7 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
           dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "itsm", title: "Under-Replication Resolved", message: "✅ payments.settlements.v1 ISR restored 1→3. Lag 18,900→0. SEV-1 resolved.", scenarioId: "under-replication" } });
           sendEmail(dispatch, "under-replication", "Under-Replicated Partitions", LAG, 0, "kafka.reassignPartitions(broker-3→broker-1)", {
             approved: true, approvedBy: "operator",
-            reasoning: { rootCause: "Broker-3 GC pause + disk I/O saturation caused ISR shrinkage to 1 (minISR=2) — rack coverage violated", confidence: 0.97, kafkaFeature: "KRaft ISR Management", rationale: "Reassigned 4 partitions to broker-1. ISR restored. Lag fully drained." },
+            reasoning: { rootCause: "Broker-3 GC pause + disk I/O saturation caused ISR shrinkage to 1 (minISR=2) — rack coverage violated", confidence: 0.97, kafkaFeatureCited: "KRaft ISR Management", rationale: "Reassigned 4 partitions to broker-1. ISR restored. Lag fully drained." },
             lesson: { notes: "Set JVM heap to 70% of RAM with -XX:+UseG1GC. Alert at ISR < minISR within 30s. Keep broker-3 headroom >30%." },
             slackMessage: "✅ payments.settlements.v1 ISR restored 1→3. Settlement batches resuming.",
             itsmTicket: `SEV1-${Date.now().toString().slice(-5)} — Under-Replicated Partitions AUTO-RESOLVED`,
@@ -1101,7 +1110,7 @@ function runProducerTimeout(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Producer ACK timeout storm: broker leader election exceeded request.timeout.ms — acks=all stalled during ISR under-replication", kafkaFeature: "Producer Config", confidence: 0.89,
+      lastReasoning: { rootCause: "Producer ACK timeout storm: broker leader election exceeded request.timeout.ms — acks=all stalled during ISR under-replication", kafkaFeatureCited: "Producer Config", confidence: 0.89,
         rationale: "Broker leader election taking longer than request.timeout.ms, expiring producer ACKs. acks=all with under-replicated partition means no acknowledgement until ISR recovers. Network congestion between producer host and broker caused ACK timeout cascade. Producer batch size (64KB) too small for available broker memory, triggering request queuing. Record-queue-time P99 hit 4.8s — auto-remediation triggered." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(2100), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "record-queue-time P99: 4.8s (SLO: 500ms). batch.size 64KB saturated at 340 batches/s peak. buffer.memory 80% consumed.", "reasoning") });
@@ -1137,7 +1146,7 @@ function runProducerTimeout(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #producer-ops: timeout storm resolved. Config change documented in runbook.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Producer Timeout Resolved", message: "✅ payments-gateway P99 queue-time 4.8s→180ms · batch.size 64KB→2MB", scenarioId: "producer-timeout" } });
     sendEmail(dispatch, "producer-timeout", "Producer Timeout Storm", 2100, 0, "kafka.tuneProducerConfig(batch.size=2MB, linger.ms=20)", {
-      reasoning: { rootCause: "Producer ACK timeouts: leader election latency + acks=all under ISR violation created timeout cascade on payments-gateway", confidence: 0.89, kafkaFeature: "Producer Config", rationale: "Increased batch.size to 2MB and linger.ms to 20ms — 28× batch efficiency gain, P99 4.8s→180ms." },
+      reasoning: { rootCause: "Producer ACK timeouts: leader election latency + acks=all under ISR violation created timeout cascade on payments-gateway", confidence: 0.89, kafkaFeatureCited: "Producer Config", rationale: "Increased batch.size to 2MB and linger.ms to 20ms — 28× batch efficiency gain, P99 4.8s→180ms." },
       lesson: { notes: "Set batch.size=2MB and linger.ms=15-20ms for high-throughput producers. Alert on record-queue-time P99 > 500ms." },
       slackMessage: "✅ Producer timeout storm resolved — P99 queue-time 4.8s→180ms",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Producer Timeout Storm`,
@@ -1177,7 +1186,7 @@ function runConsumerSessionTimeout(dispatch: DispatchFn): () => void {
   t(2200, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Consumer session timeout: JVM GC stop-the-world pause (P99: 12.4s) exceeded session.timeout.ms=10s — group coordinator evicting members", kafkaFeature: "Consumer Group Protocol", confidence: 0.92,
+      lastReasoning: { rootCause: "Consumer session timeout: JVM GC stop-the-world pause (P99: 12.4s) exceeded session.timeout.ms=10s — group coordinator evicting members", kafkaFeatureCited: "Consumer Group Protocol", confidence: 0.92,
         rationale: "Consumer JVM GC stop-the-world pause (P99: 12.4s) exceeded session.timeout.ms=10s. Consumer application deadlock may have prevented poll loop from running within max.poll.interval.ms. Network partition between consumer and group coordinator triggered session expiry. Consumer processing oversized record batch beyond the heartbeat interval. Group coordinator evicting members every ~90s — rebalance storm ongoing." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(3400), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "GC pause P99=12.4s on payment-processor instances. session.timeout=10s evicts members. Triggers full rebalance · 3,400 msg lag spike per event.", "reasoning") });
@@ -1213,7 +1222,7 @@ function runConsumerSessionTimeout(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #consumer-ops: session timeout resolved. G1GC migration ticket opened.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Session Timeout Resolved", message: "✅ payment-processor rebalance storm resolved · session.timeout 10s→45s · lag clear", scenarioId: "consumer-session-timeout" } });
     sendEmail(dispatch, "consumer-session-timeout", "Consumer Session Timeout Storm", 3400, 0, "kafka.updateConsumerConfig(session.timeout.ms=45000)", {
-      reasoning: { rootCause: "GC pause P99=12.4s exceeded session.timeout — consumer heartbeat missed, group coordinator triggered rebalance storm", confidence: 0.92, kafkaFeature: "Consumer Group Protocol", rationale: "Increased session.timeout to 45s and heartbeat.interval to 15s. Rebalance storm eliminated." },
+      reasoning: { rootCause: "GC pause P99=12.4s exceeded session.timeout — consumer heartbeat missed, group coordinator triggered rebalance storm", confidence: 0.92, kafkaFeatureCited: "Consumer Group Protocol", rationale: "Increased session.timeout to 45s and heartbeat.interval to 15s. Rebalance storm eliminated." },
       lesson: { notes: "Set session.timeout.ms = 3× GC pause P99. Use G1GC to keep pauses <1s. Alert on rebalance rate >5/hour." },
       slackMessage: "✅ Consumer session timeout resolved — rebalance storm stopped",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Consumer Session Timeout Storm`,
@@ -1253,7 +1262,7 @@ function runCompactionLag(dispatch: DispatchFn): () => void {
   t(2000, () => {
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause: "Log compaction lag: log.cleaner.threads insufficient for volume — tombstone write rate (8,000/min) exceeds compaction throughput (5,200/min)", kafkaFeature: "Log Compaction", confidence: 0.88,
+      lastReasoning: { rootCause: "Log compaction lag: log.cleaner.threads insufficient for volume — tombstone write rate (8,000/min) exceeds compaction throughput (5,200/min)", kafkaFeatureCited: "Log Compaction", confidence: 0.88,
         rationale: "Log cleaner thread count (2) insufficient for volume of compacted topics. High write throughput caused dirty ratio to spike faster than cleanup could proceed. Compaction I/O competing with replication I/O on the same disk controller. Large number of unique keys producing high tombstone volume slowing cleanup passes. __consumer_offsets compaction queue depth 240 (healthy: <20) — auto-remediation triggered." } });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(0), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", "Tombstone write rate 8,000/min > cleaner capacity 5,200/min. Queue depth 240. Topic size growing 2.1GB/day. Retention at risk.", "reasoning") });
@@ -1289,7 +1298,7 @@ function runCompactionLag(dispatch: DispatchFn): () => void {
     dispatch({ type: "audit", record: auditRec("notification", "Slack #kafka-ops: compaction lag resolved. Runbook updated with cleaner tuning guide.", "notification") });
     dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Compaction Lag Resolved", message: "✅ invoices.created.v1 cleaner queue 240→12 · topic growth normalised", scenarioId: "compaction-lag" } });
     sendEmail(dispatch, "compaction-lag", "Log Compaction Lag", 0, 0, "kafka.updateTopicConfig(min.compaction.lag.ms=1h, cleanerThreads=6)", {
-      reasoning: { rootCause: "Tombstone write rate (8,000/min) exceeded cleaner throughput (5,200/min) — compaction I/O contention with replication on disk controller", confidence: 0.88, kafkaFeature: "Log Compaction", rationale: "Increased cleaner threads 2→6. Queue depth 240→12. Topic growth rate normalised." },
+      reasoning: { rootCause: "Tombstone write rate (8,000/min) exceeded cleaner throughput (5,200/min) — compaction I/O contention with replication on disk controller", confidence: 0.88, kafkaFeatureCited: "Log Compaction", rationale: "Increased cleaner threads 2→6. Queue depth 240→12. Topic growth rate normalised." },
       lesson: { notes: "Monitor log.cleaner.backoff.ms and queue depth. Alert when uncompacted ratio >0.5. Run 4+ cleaner threads on compacted topics." },
       slackMessage: "✅ Compaction lag resolved — invoices.created.v1 cleaner queue 240→12",
       itsmTicket: `INC-${Date.now().toString().slice(-5)} — Log Compaction Lag`,
@@ -1423,7 +1432,7 @@ export function runTopicManagement(payload: TopicChangePayload, dispatch: Dispat
             : operation === "edit"
             ? `Topic ${topic.name} configuration update`
             : `New topic ${topic.name} provisioned`,
-          kafkaFeature: "kafka.admin",
+          kafkaFeatureCited: "kafka.admin",
           confidence: 0.97,
           rationale: operation === "delete"
             ? `Consumer groups confirmed idle. All offsets cleared. Topic safely removed.`
@@ -1486,7 +1495,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
     agents = patch(agents, "intake", { status: "online", mralPhase: "idle" });
     agents = patch(agents, "monitor", {
       status: "reasoning", mralPhase: "reason",
-      lastReasoning: { rootCause, kafkaFeature: isCritical ? "KIP-848" : "Consumer Groups", confidence: isCritical ? 0.93 : 0.87, rationale },
+      lastReasoning: { rootCause, kafkaFeatureCited: isCritical ? "KIP-848" : "Consumer Groups", confidence: isCritical ? 0.93 : 0.87, rationale },
     });
     dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", rootCause, "reasoning") });
@@ -1515,18 +1524,17 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
     t(6500, () => {
       const approvalId = uid();
       const toolCall: import("./types").MCPToolCall = {
-        id: uid(), ts: Date.now(),
+        jsonrpc: "2.0", id: uid(), method: "tools/call",
         params: {
           name: "kafka.scaleConsumers",
           arguments: { group: `${topicName}-consumer`, delta: 2, reason: `Critical lag ${lagTotal.toLocaleString()} — dead replica restart required` },
         },
-        status: "pending",
       };
       agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting" });
       dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
       const _approvalObj = { id: approvalId, toolCall, reason: rootCause, ts: Date.now() };
       _globalPendingApprovals.push(_approvalObj as ApprovalRequest);
-      dispatch({ type: "state", payload: { pendingApprovals: [..._globalPendingApprovals] } });
+      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       dispatch({ type: "audit", record: auditRec("monitor", `Approval gate: restart consumer group + scale replicas on ${topicName}. Awaiting operator sign-off.`, "approval") });
       toast(dispatch, `🔐 Approval required — healing ${topicName}`, "warning");
 
@@ -1542,7 +1550,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
             toast(dispatch, `🚫 Heal rejected — ${topicName} remains critical`, "error");
             sendEmail(dispatch, "topic-heal", `Topic Heal — ${topicName}`, lagTotal, lagTotal, healAction, {
               approved: false, approvedBy: "operator",
-              reasoning: { rootCause, kafkaFeature: "KIP-848", confidence: 0.93, rationale },
+              reasoning: { rootCause, kafkaFeatureCited: "KIP-848", confidence: 0.93, rationale },
               lesson: { notes: "Operator rejected heal. Escalate to on-call SRE." },
               slackMessage: `🚫 Heal REJECTED for ${topicName}. Manual review required.`,
               itsmTicket: `INC-${actMs.toString().slice(-5)} — Critical Topic Heal REJECTED`,
@@ -1554,7 +1562,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
         delay(300, () => {
           agents = patch(agents, "monitor", {
             status: "acting", mralPhase: "act",
-            lastAction: { detail: healAction, toolCallId: uid(), outcome: "success" },
+            lastAction: { detail: healAction, toolCalled: uid(), outcome: "success" },
           });
           dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
           dispatch({ type: "audit", record: auditRec("monitor", `✅ Approved. Executing: restart dead replica + scale +2 consumers on ${topicName}`, "tool-call") });
@@ -1598,7 +1606,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
           dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
           sendEmail(dispatch, "topic-heal", `Topic Heal — ${topicName}`, lagTotal, lagAfter, healAction, {
             approved: true, approvedBy: "operator",
-            reasoning: { rootCause, kafkaFeature: "KIP-848", confidence: 0.93, rationale },
+            reasoning: { rootCause, kafkaFeatureCited: "KIP-848", confidence: 0.93, rationale },
             lesson: { notes: `Critical lag on ${topicName} resolved. Add consumer liveness probes. Alert at lag>10k.`, adjustedThreshold: 10000 },
             slackMessage: `✅ ${topicName} recovered — lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}`,
             itsmTicket: `INC-${actMs.toString().slice(-5)} — Critical Topic Heal`,
@@ -1612,7 +1620,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
     t(6800, () => {
       agents = patch(agents, "monitor", {
         status: "acting", mralPhase: "act",
-        lastAction: { detail: healAction, toolCallId: uid(), outcome: "success" },
+        lastAction: { detail: healAction, toolCalled: uid(), outcome: "success" },
       });
       dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
       dispatch({ type: "audit", record: auditRec("monitor", `Scaling consumer group: +${Math.max(1, Math.floor(partitions / 4))} replicas on ${topicName} — cooperative rebalance initiated`, "tool-call") });
@@ -1656,7 +1664,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
       dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
       sendEmail(dispatch, "topic-heal", `Topic Heal — ${topicName}`, lagTotal, lagAfter, healAction, {
         approved: true, approvedBy: "auto",
-        reasoning: { rootCause, kafkaFeature: "Consumer Groups", confidence: 0.87, rationale },
+        reasoning: { rootCause, kafkaFeatureCited: "Consumer Groups", confidence: 0.87, rationale },
         lesson: { notes: `Degraded ${topicName} healed via scale-out. Set auto-scale: lag>2,800 → +1 replica.`, adjustedThreshold: 2800 },
         slackMessage: `✅ ${topicName} healthy — lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}`,
         itsmTicket: `INC-${Date.now().toString().slice(-5)} — Degraded Topic Heal`,

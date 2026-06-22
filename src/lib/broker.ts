@@ -47,6 +47,10 @@ export class BrokerSim {
     ],
     schemaRegistry: { connected: true, specs: 6 },
     security: { mTLS: true, saslScram: true, aclsActive: 18 },
+    brokersOnline: 3,
+    mtls: true,
+    sasl: true,
+    aclCount: 18,
   };
   /** consumerGroup -> topic -> committed offsets */
   private commits: Record<string, Partial<Record<TopicName, ConsumerCheckpoint>>> = {};
@@ -66,9 +70,9 @@ export class BrokerSim {
   }
 
   forceControllerFailover(): { from: number; to: number; epoch: number } {
-    const from = this.cluster.controllerId;
-    const candidates = this.cluster.brokers.map((b) => b.id).filter((id) => id !== from);
-    const to = candidates[Math.floor(Math.random() * candidates.length)];
+    const from = this.cluster.controllerId ?? 1;
+    const candidates = (this.cluster.brokers ?? []).map((b) => b.id).filter((id) => id !== from);
+    const to = candidates[Math.floor(Math.random() * candidates.length)] ?? from;
     this.cluster.controllerId = to;
     this.cluster.controllerEpoch += 1;
     return { from, to, epoch: this.cluster.controllerEpoch };
@@ -86,6 +90,7 @@ export class BrokerSim {
       topic,
       partition,
       offset: log.records.length,
+      ts: Date.now(),
       key,
       value,
       timestamp: Date.now(),
@@ -187,7 +192,7 @@ export class BrokerSim {
   recent(topic: TopicName, count = 50): KafkaRecord[] {
     const merged: KafkaRecord[] = [];
     for (const p of this.partitions[topic]) merged.push(...p.records);
-    merged.sort((a, b) => b.timestamp - a.timestamp);
+    merged.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
     return merged.slice(0, count);
   }
 
@@ -199,7 +204,7 @@ export class BrokerSim {
     this.commits = {};
     this.cluster.controllerId = 1;
     this.cluster.controllerEpoch = 14;
-    for (const b of this.cluster.brokers) b.status = "online";
+    for (const b of (this.cluster.brokers ?? [])) b.status = "online";
   }
 
   private hash(s: string): number {

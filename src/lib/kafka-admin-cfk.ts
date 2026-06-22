@@ -188,7 +188,7 @@ export async function describeConsumerGroup(groupId: string): Promise<{
     let totalLag = 0;
     try {
       const offsets = await admin.fetchOffsets({ groupId, topics: [] });
-      const topicNames = [...new Set(offsets.map((o) => o.topic))];
+      const topicNames = Array.from(new Set(offsets.map((o) => o.topic)));
       for (const topic of topicNames) {
         const topicOffsets = await admin.fetchTopicOffsets(topic);
         const groupTopicOffsets = offsets.filter((o) => o.topic === topic);

@@ -184,7 +184,7 @@ function AgentInspector({ id }: { id: AgentId }) {
 }
 
 function EdgeInspector({ topic }: { topic: TopicName }) {
-  const spec = ASYNCAPI_SPECS[topic];
+  const spec = ASYNCAPI_SPECS.find((s) => s.topicName === topic);
   const records = useMesh((s) => s.recentTopicRecords[topic] ?? []);
   const meta = useMesh((s) => s.topics?.[topic]);
 
@@ -193,7 +193,7 @@ function EdgeInspector({ topic }: { topic: TopicName }) {
       <div>
         <div className="text-[10px] uppercase font-mono tracking-wider text-fg-dim mb-1">Topic</div>
         <div className="text-[15px] font-semibold text-fg-base">{topic}</div>
-        <div className="text-[12px] text-fg-muted mt-1.5">{spec.info.description}</div>
+        <div className="text-[12px] text-fg-muted mt-1.5">{spec?.info.description ?? topic}</div>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -219,7 +219,7 @@ function EdgeInspector({ topic }: { topic: TopicName }) {
                   <span className="tag">p{r.partition}</span>
                   <span className="text-fg-muted">o{r.offset}</span>
                   <span className="text-fg-base flex-1 truncate">{r.key}</span>
-                  <span className="text-fg-dim">{relTime(r.timestamp)}</span>
+                  <span className="text-fg-dim">{relTime(r.timestamp ?? Date.now())}</span>
                 </summary>
                 <div className="p-2 border-t border-white/10">
                   <JsonPretty value={r.value} />
@@ -239,8 +239,8 @@ function EdgeInspector({ topic }: { topic: TopicName }) {
 
 function AsyncApiTab() {
   const [pick, setPick] = useState<TopicName>("ops.kafka.metrics.v1");
-  const spec = ASYNCAPI_SPECS[pick];
-  const topics = Object.keys(ASYNCAPI_SPECS) as TopicName[];
+  const spec = ASYNCAPI_SPECS.find((s) => s.topicName === pick);
+  const topics = ASYNCAPI_SPECS.map((s) => s.topicName as TopicName);
 
   return (
     <div className="flex flex-col h-full">
@@ -261,8 +261,8 @@ function AsyncApiTab() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
-        <div className="text-[15px] font-semibold mb-1">{spec.info.title}</div>
-        <div className="text-[11.5px] text-fg-muted mb-3">{spec.info.description}</div>
+        <div className="text-[15px] font-semibold mb-1">{spec?.info.title ?? pick}</div>
+        <div className="text-[11.5px] text-fg-muted mb-3">{spec?.info.description ?? pick}</div>
         <JsonPretty value={spec} />
       </div>
     </div>
@@ -340,7 +340,7 @@ function LessonsTab() {
       {[...lessons].reverse().map((l) => (
         <div key={l.id} className="rounded-lg border border-white/10 bg-bg-elev p-3">
           <div className="flex items-center justify-between text-[11px]">
-            <span className="tag !text-violet-300 !border-violet-500/40">{l.scenario}</span>
+            <span className="tag !text-violet-300 !border-violet-500/40">{l.scenarioId}</span>
             <span className="text-fg-dim font-mono">{relTime(l.ts)}</span>
           </div>
           <div className="text-[12px] mt-1.5">
@@ -350,7 +350,7 @@ function LessonsTab() {
             </span>
           </div>
           <div className="text-[11px] text-fg-muted mt-1 font-mono">
-            lag {l.lagBefore.toLocaleString()} → {l.lagAfter.toLocaleString()}
+            lag {(l.lagBefore ?? 0).toLocaleString()} → {(l.lagAfter ?? 0).toLocaleString()}
             {l.adjustedThreshold != null && (
               <span> · threshold→{l.adjustedThreshold.toLocaleString()}</span>
             )}
@@ -386,7 +386,7 @@ function AuditTab() {
               <span className="text-fg-muted">{e.agent}</span>
               <span className="ml-auto text-fg-dim">{relTime(e.ts)}</span>
             </div>
-            <div className="text-fg-base mt-0.5 truncate">{e.detail}</div>
+            <div className="text-fg-base mt-0.5 truncate">{String(e.detail ?? "")}</div>
           </li>
         ))}
       </ul>

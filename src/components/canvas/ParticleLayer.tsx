@@ -104,8 +104,8 @@ export function ParticleLayer() {
         b = nodeTopHandleLeft(nodePositions["monitor-agent"]);
         c = { x: (a.x + b.x) / 2, y: a.y - 90 };
       } else {
-        a = nodeRightHandle(nodePositions[p.source]);
-        b = nodeLeftHandle(nodePositions[p.target]);
+        a = nodeRightHandle((nodePositions as Record<string, {x:number;y:number}>)[p.source]);
+        b = nodeLeftHandle((nodePositions as Record<string, {x:number;y:number}>)[p.target]);
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         c = { x: mid.x, y: mid.y - 60 };
       }

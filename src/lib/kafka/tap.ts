@@ -166,13 +166,14 @@ export class KafkaTap {
       topic,
       partition: msg.partition,
       offset: msg.offset,
+      ts: Date.now(),
       key: msg.key ?? "",
       value: parsed,
       timestamp: msg.timestamp || Date.now(),
       headers: msg.headers,
     };
     const wire: WireEvent = { kind: "topic-record", payload: rec };
-    getEventBus().publish(wire);
+    getEventBus().publish(wire as unknown as import('../types').BusEvent);
   }
 }
 

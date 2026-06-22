@@ -84,6 +84,7 @@ declare global {
     timer: NodeJS.Timeout | null;
     state: PollLoopState;
     history: MetricSnapshot[];
+    recentDetections: Array<TriggerResult & { ts: number }>;
     activeScenarios: Set<PollScenarioId>;
   } | undefined;
 }
@@ -102,7 +103,7 @@ function getPollGlobal() {
         detectedThisCycle: [],
       },
       history: [],
-      recentDetections: [] as Array<{ scenarioId: PollScenarioId; ts: number; confidence: number; gate: string; cause: string }>,
+      recentDetections: [] as Array<TriggerResult & { ts: number }>,
       activeScenarios: new Set(),
     };
   }
@@ -648,7 +649,7 @@ function evalSignalledScenarios(
 
 async function runPollCycle(): Promise<void> {
   const g = getPollGlobal();
-  const { state, history, activeScenarios } = g;
+  const { state, history, activeScenarios } = g!;
 
   state.cycleCount++;
   state.lastPollAt = Date.now();
@@ -681,8 +682,7 @@ async function runPollCycle(): Promise<void> {
 
     state.detectedThisCycle.push(result);
     // Persist for 2 min so rings stay visible between poll cycles
-    if (!g.recentDetections) g.recentDetections = [];
-    (g.recentDetections as Array<{ scenarioId: PollScenarioId; ts: number; confidence: number; gate: string; cause: string }>).push({ ...result, ts: now });
+    g!.recentDetections.push({ ...result, ts: now });
 
     const { scenarioId, cause, confidence, gate } = result;
 
@@ -765,14 +765,14 @@ async function runPollCycle(): Promise<void> {
 
 export function startMonitorPolling(): void {
   const g = getPollGlobal();
-  if (g.state.running) return;
-  g.state.running = true;
+  if (g!.state.running) return;
+  g!.state.running = true;
 
   // Fire one cycle immediately, then repeat
   runPollCycle().catch((e) =>
     console.error("[MonitorPoll] First cycle error:", safeErr(e))
   );
-  g.timer = setInterval(() => {
+  g!.timer = setInterval(() => {
     runPollCycle().catch((e) =>
       console.error("[MonitorPoll] Cycle error:", safeErr(e))
     );
@@ -783,11 +783,11 @@ export function startMonitorPolling(): void {
 
 export function stopMonitorPolling(): void {
   const g = getPollGlobal();
-  if (g.timer) {
-    clearInterval(g.timer);
-    g.timer = null;
+  if (g!.timer) {
+    clearInterval(g!.timer);
+    g!.timer = null;
   }
-  g.state.running = false;
+  g!.state.running = false;
   console.log("[MonitorPoll] Stopped");
 }
 
@@ -797,17 +797,16 @@ export function getMonitorPollState(): PollLoopState & {
   const g = getPollGlobal();
   const TWO_MIN = 2 * 60_000;
   const now = Date.now();
-  const recentWindow = ((g.recentDetections ?? []) as Array<{ ts: number } & TriggerResult>)
-    .filter((d) => now - d.ts < TWO_MIN);
+  const recentWindow = (g?.recentDetections ?? []).filter((d) => now - d.ts < TWO_MIN);
   // Deduplicate: keep latest entry per scenarioId
   const seen = new Map<string, typeof recentWindow[0]>();
   for (const d of recentWindow) seen.set(d.scenarioId, d);
   const deduped = Array.from(seen.values());
-  return { ...g.state, detectedThisCycle: deduped, historyLength: g.history.length };
+  return { ...g!.state, detectedThisCycle: deduped, historyLength: g!.history.length };
 }
 
 export function getLatestSnapshot(): MetricSnapshot | null {
   const g = getPollGlobal();
-  return g.history.length ? g.history[g.history.length - 1] : null;
+  return g!.history.length ? g!.history[g!.history.length - 1] : null;
 }
 

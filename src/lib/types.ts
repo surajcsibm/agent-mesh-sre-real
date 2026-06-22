@@ -32,6 +32,9 @@ export type AgentId =
   | "intake" | "monitor" | "writer" | "notification"
   | "intake-agent" | "monitor-agent" | "writer-agent" | "notification-agent";
 
+/** Narrowed subset used as object keys by the server-side mesh runtime. */
+export type ServerAgentId = "intake" | "monitor" | "writer" | "notification";
+
 export type TopicName =
   | "ops.requests.v1"
   | "ops.kafka.metrics.v1"
@@ -71,31 +74,31 @@ export interface ReasoningOutput {
   rootCause: string;
   confidence: number;
   kafkaFeatureCited: string;
-  rebalanceState: string;
-  controllerEpoch: number;
-  crossCorrelation: {
+  rebalanceState?: string;
+  controllerEpoch?: number;
+  crossCorrelation?: {
     brokers: string;
     jvmHeap: string;
     networkInRate: string;
     rebalanceInProgress: boolean;
   };
-  recommendedAction: string;
-  requiresApproval: boolean;
+  recommendedAction?: string;
+  requiresApproval?: boolean;
   rationale: string;
   proposedToolCall?: MCPToolCall;
-  lessonsCited: string[];
+  lessonsCited?: string[];
 }
 
 // ── Result of an executed action ──────────────────────────────────────────────
 
 export interface ActionResult {
-  approved: boolean;
+  approved?: boolean;
   approvedBy?: string;
   outcome: "success" | "acked" | "suppressed" | "rejected";
   detail: string;
   lagBefore?: number;
   lagAfter?: number;
-  toolCalled: string;
+  toolCalled?: string;
   clusterMutation?: string;
 }
 
@@ -189,7 +192,7 @@ export interface LessonRecord {
   ts: number;
   scenarioId: string;
   actionTaken: string;
-  effective: boolean;
+  effective?: boolean;
   lagBefore?: number;
   lagAfter?: number;
   adjustedThreshold?: number;

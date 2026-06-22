@@ -23,9 +23,9 @@ export async function POST(req: Request) {
       if (effect) {
         effect(b);
       } else if (EXTENDED.includes(scenario)) {
-        if (!(b as Record<string,unknown>).signalledScenarios)
-          (b as Record<string,unknown>).signalledScenarios = {};
-        ((b as Record<string,unknown>).signalledScenarios as Record<string,number>)[scenario] = Date.now();
+        if (!(b as unknown as Record<string,unknown>).signalledScenarios)
+          (b as unknown as Record<string,unknown>).signalledScenarios = {};
+        ((b as unknown as Record<string,unknown>).signalledScenarios as Record<string,number>)[scenario] = Date.now();
       }
     });
 

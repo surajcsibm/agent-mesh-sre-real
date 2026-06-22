@@ -107,7 +107,7 @@ const sslConfig = process.env.KAFKA_SSL_CA_B64
         | "scram-sha-512",
       username: process.env.KAFKA_SASL_USERNAME!,
       password: process.env.KAFKA_SASL_PASSWORD!,
-    },
+    } as any,
     logLevel: logLevel.WARN,
   });
  
@@ -183,7 +183,7 @@ const sslConfig = process.env.KAFKA_SSL_CA_B64
         | "scram-sha-512",
       username: process.env.KAFKA_SASL_USERNAME!,
       password: process.env.KAFKA_SASL_PASSWORD!,
-    },
+    } as any,
     logLevel: logLevel.WARN,
   });
 

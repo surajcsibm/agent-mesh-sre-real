@@ -37,7 +37,8 @@ type Action =
   | { type: "lesson"; record: LessonRecord }
   | { type: "connected"; value: boolean }
   | { type: "emailSummary"; data: EmailSummaryData | null }
-  | { type: "lastEmailSummary"; data: EmailSummaryData | null };
+  | { type: "lastEmailSummary"; data: EmailSummaryData | null }
+  | { type: "add_pending_approval"; payload: import("@/lib/types").ApprovalRequest };
 
 const initial: MeshClientState = {
   agents: [], broker: null, mralPhase: "idle",
@@ -145,7 +146,7 @@ export function useMeshStream() {
             // Add the approval to state.pendingApprovals so the Dashboard modal shows.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const ap = (event as any).payload;
-            if (ap) dispatch({ type: "state", payload: { pendingApprovals: [ap] } });
+            if (ap) dispatch({ type: "add_pending_approval", payload: ap });
             break;
           }
           case "approval-update": {
@@ -153,12 +154,12 @@ export function useMeshStream() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const upd = (event as any).payload;
             const keep = upd?.status === "pending" ? [upd] : [];
-            dispatch({ type: "state", payload: { pendingApprovals: keep } });
+            if (keep.length > 0) {
+              dispatch({ type: "add_pending_approval", payload: keep[0] });
+            }
             break;
           }
-          case "add_pending_approval":
-      return { ...state, pendingApprovals: [...(state.pendingApprovals || []), (action as { type: string; payload: unknown }).payload as import("@/lib/types").ApprovalRequest] };
-    case "audit":
+          case "audit":
             dispatch({ type: "audit", record: event.record });
             break;
           case "toast": {

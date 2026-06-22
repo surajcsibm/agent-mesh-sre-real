@@ -12,7 +12,6 @@
  */
 import "server-only";
 import * as k8s from "@kubernetes/client-node";
-import { PatchStrategy } from "@kubernetes/client-node";
 import { parseAllDocuments } from "yaml";
 
 export type ApplyResult = {
@@ -87,7 +86,7 @@ export class K8sClient {
     const user = this.kc.getCurrentUser();
     try {
       // Hit /version which every k8s API server exposes & is unauthenticated-safe
-      await this.core.listNamespace({ limit: 1 });
+      await this.core.listNamespace();
       return {
         connected: true,
         context: ctx,
@@ -111,8 +110,8 @@ export class K8sClient {
   async hasStrimziCrds(): Promise<{ present: boolean; version?: string }> {
     try {
       const ext = this.kc.makeApiClient(k8s.ApiextensionsV1Api);
-      const crds = await ext.listCustomResourceDefinition();
-      const kafkaCrd = crds.items.find((c) => c.metadata?.name === "kafkas.kafka.strimzi.io");
+      const crdsRes = await ext.listCustomResourceDefinition();
+      const kafkaCrd = crdsRes.body.items.find((c) => c.metadata?.name === "kafkas.kafka.strimzi.io");
       if (!kafkaCrd) return { present: false };
       const version =
         kafkaCrd.metadata?.labels?.["app.kubernetes.io/version"] ??
@@ -163,8 +162,7 @@ export class K8sClient {
         undefined,
         undefined,
         fieldManager,
-        true,
-        PatchStrategy.ServerSideApply
+        true
       );
       return { group, version, kind, namespace, name, action: "updated" };
     } catch (e: unknown) {
@@ -187,7 +185,7 @@ export class K8sClient {
     const header = {
       apiVersion: obj.apiVersion,
       kind: obj.kind,
-      metadata: { name: obj.metadata.name, namespace: obj.metadata.namespace },
+      metadata: { name: obj.metadata.name, namespace: obj.metadata.namespace ?? "default" },
     };
     try {
       const r = await this.objectApi.read(header);
@@ -231,13 +229,9 @@ export class K8sClient {
     namespace: string
   ): Promise<T | null> {
     try {
-      const r = await this.custom.getNamespacedCustomObject({
-        group: STRIMZI_GROUP,
-        version: STRIMZI_VERSION,
-        namespace,
-        plural,
-        name,
-      });
+      const r = await this.custom.getNamespacedCustomObject(
+        STRIMZI_GROUP, STRIMZI_VERSION, namespace, plural, name
+      );
       return r as T;
     } catch (e: unknown) {
       if (errStatusCode(e) === 404) return null;
@@ -246,12 +240,9 @@ export class K8sClient {
   }
 
   private async listStrimzi<T>(plural: string, namespace: string): Promise<T[]> {
-    const r = await this.custom.listNamespacedCustomObject({
-      group: STRIMZI_GROUP,
-      version: STRIMZI_VERSION,
-      namespace,
-      plural,
-    });
+    const r = await this.custom.listNamespacedCustomObject(
+      STRIMZI_GROUP, STRIMZI_VERSION, namespace, plural
+    );
     const list = r as { items?: T[] };
     return list.items ?? [];
   }
@@ -260,7 +251,7 @@ export class K8sClient {
 
   async getDeployment(name: string, namespace: string) {
     try {
-      return await this.apps.readNamespacedDeployment({ name, namespace });
+      return await this.apps.readNamespacedDeployment(name, namespace);
     } catch (e: unknown) {
       if (errStatusCode(e) === 404) return null;
       throw e;
@@ -268,11 +259,9 @@ export class K8sClient {
   }
 
   async scaleDeployment(name: string, namespace: string, replicas: number): Promise<void> {
-    await this.apps.patchNamespacedDeploymentScale({
-      name,
-      namespace,
-      body: { spec: { replicas } },
-    });
+    await this.apps.patchNamespacedDeploymentScale(
+      name, namespace, { spec: { replicas } }
+    );
   }
 
   async setDeploymentEnv(
@@ -282,31 +271,34 @@ export class K8sClient {
     key: string,
     value: string
   ): Promise<void> {
-    const dep = await this.getDeployment(name, namespace);
+    const depRaw = await this.getDeployment(name, namespace);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dep = (depRaw && typeof depRaw === 'object' && 'body' in depRaw ? (depRaw as {body: unknown}).body : depRaw) as any;
     if (!dep) throw new Error(`Deployment ${namespace}/${name} not found`);
     const containers = dep.spec?.template?.spec?.containers ?? [];
-    const target = containers.find((c) => c.name === container) ?? containers[0];
+    const target = containers.find((c: {name: string}) => c.name === container) ?? containers[0];
     if (!target) throw new Error(`No container in ${namespace}/${name}`);
     const env = target.env ?? [];
-    const existing = env.find((e) => e.name === key);
+    const existing = env.find((e: {name: string; value?: string}) => e.name === key);
     if (existing) existing.value = value;
     else env.push({ name: key, value });
     target.env = env;
-    await this.apps.replaceNamespacedDeployment({ name, namespace, body: dep });
+    await this.apps.replaceNamespacedDeployment(name, namespace, dep);
   }
 
   async deletePod(name: string, namespace: string, gracePeriodSeconds = 10): Promise<void> {
-    await this.core.deleteNamespacedPod({ name, namespace, gracePeriodSeconds });
+    await this.core.deleteNamespacedPod(name, namespace, undefined, undefined, gracePeriodSeconds);
   }
 
   async listPods(namespace: string, labelSelector?: string) {
-    return this.core.listNamespacedPod({ namespace, labelSelector });
+    return this.core.listNamespacedPod(namespace, undefined, undefined, undefined, labelSelector);
   }
 
   async getSecretData(name: string, namespace: string): Promise<Record<string, Buffer> | null> {
     try {
-      const s = await this.core.readNamespacedSecret({ name, namespace });
-      const data = s.data ?? {};
+      const s = await this.core.readNamespacedSecret(name, namespace);
+      const secret = (s && typeof s === 'object' && 'body' in s) ? (s as {body: {data?: Record<string, string>}}).body : s as {data?: Record<string, string>};
+      const data = secret.data ?? {};
       const out: Record<string, Buffer> = {};
       for (const [k, v] of Object.entries(data)) {
         out[k] = Buffer.from(v, "base64");
@@ -320,7 +312,7 @@ export class K8sClient {
 
   async getNamespace(name: string) {
     try {
-      return await this.core.readNamespace({ name });
+      return await this.core.readNamespace(name);
     } catch (e) {
       if (errStatusCode(e) === 404) return null;
       throw e;

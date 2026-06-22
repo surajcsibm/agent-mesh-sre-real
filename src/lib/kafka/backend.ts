@@ -53,7 +53,7 @@ export class KafkaBackend {
       clientId: opts.clientId ?? "agent-mesh-sre",
       brokers: opts.brokers,
       ssl: opts.ssl ? (opts.ca ? { ca: [opts.ca], rejectUnauthorized: false } : true) : false,
-      sasl: opts.sasl,
+      sasl: opts.sasl as any,
       logLevel: logLevel.NOTHING,
       connectionTimeout: 8_000,
       requestTimeout: 12_000,

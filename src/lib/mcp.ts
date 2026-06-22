@@ -2,7 +2,7 @@
 // mesh.ts calls tools by name; this file is the authoritative source of truth for
 // what each tool accepts, returns, and whether it requires human approval.
 
-import type { AgentId } from "./types";
+import type { AgentId, ServerAgentId } from "./types";
 
 export interface MCPTool {
   name:             string;
@@ -205,7 +205,7 @@ export const MCP_TOOLS: MCPTool[] = [
 
 // Per-agent tool binding — enforces least-privilege access.
 // An agent can only call the tools listed here, regardless of what mesh.ts requests.
-export const AGENT_TOOLS: Record<AgentId, string[]> = {
+export const AGENT_TOOLS: Record<ServerAgentId, string[]> = {
   intake:       ["kafka.scaleConsumers", "kafka.checkpointShareGroup"],
   monitor:      ["kafka.scaleConsumers", "kafka.ackControllerFailover",
                  "kafka.checkpointShareGroup", "kafka.suppressRebalancePage",
@@ -219,5 +219,5 @@ export const MCP_TOOL_MAP = new Map(MCP_TOOLS.map((t) => [t.name, t]));
 
 /** Return true if the given agent is allowed to call the named tool. */
 export function agentCanCall(agentId: AgentId, toolName: string): boolean {
-  return (AGENT_TOOLS[agentId] ?? []).includes(toolName);
+  return (AGENT_TOOLS[agentId as ServerAgentId] ?? []).includes(toolName);
 }

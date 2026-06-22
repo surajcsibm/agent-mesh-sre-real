@@ -17,6 +17,7 @@ import type {
   ActionResult,
   MralPhase,
   AgentId,
+  ServerAgentId,
   MCPToolCall,
 } from "./types";
 
@@ -28,7 +29,7 @@ function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms));
 
 // ── Initial state ─────────────────────────────────────────────────────────────
 
-function makeInitialAgents(): Record<AgentId, AgentState> {
+function makeInitialAgents(): Record<ServerAgentId, AgentState> {
   return {
     intake: {
       id: "intake", name: "Intake Agent",
@@ -111,7 +112,7 @@ function makeInitialBroker(): BrokerState {
 // ── Mesh state ────────────────────────────────────────────────────────────────
 
 interface MeshState {
-  agents: Record<AgentId, AgentState>;
+  agents: Record<ServerAgentId, AgentState>;
   broker: BrokerState;
   pendingApprovals: ApprovalRequest[];
   auditLog: AuditRecord[];
@@ -168,7 +169,7 @@ function toast(message: string, kind: "info" | "success" | "warning" | "error" =
   eventBus.publish({ type: "toast", message, kind });
 }
 
-function setAgent(id: AgentId, updates: Partial<AgentState>) {
+function setAgent(id: ServerAgentId, updates: Partial<AgentState>) {
   const s = getMeshState();
   s.agents[id] = { ...s.agents[id], ...updates };
   broadcastState();
@@ -439,7 +440,7 @@ async function runLagSpike() {
 
   const approvalId = uid();
   const approval: ApprovalRequest = {
-    id: approvalId, ts: Date.now(), agent: "monitor",
+    id: approvalId, ts: Date.now(), createdAt: Date.now(), agent: "monitor",
     toolCall: reasoning.proposedToolCall!, scenarioId: "lag-spike", status: "pending",
   };
   s.pendingApprovals.push(approval);
@@ -759,7 +760,7 @@ export function triggerScenario(id: "lag-spike" | "controller-failover" | "share
   return { ok: true };
 }
 
-export function killAgent(agentId: AgentId) {
+export function killAgent(agentId: ServerAgentId) {
   const s = getMeshState();
   if (s.agents[agentId].status === "crashed") return { ok: false, reason: "already_crashed" };
   setAgent(agentId, { status: "crashed", mralPhase: "idle" });
@@ -768,7 +769,7 @@ export function killAgent(agentId: AgentId) {
   return { ok: true };
 }
 
-export async function restartAgent(agentId: AgentId) {
+export async function restartAgent(agentId: ServerAgentId) {
   const s = getMeshState();
   if (s.agents[agentId].status !== "crashed") return { ok: false, reason: "not_crashed" };
   setAgent(agentId, { status: "replaying" });

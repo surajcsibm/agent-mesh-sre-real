@@ -109,7 +109,7 @@ export function EventLog() {
                     [{AGENTS[e.agent]?.name ?? e.agent}]
                   </span>
                   <span className="shrink-0 w-[120px] text-fg-muted">{e.kind}</span>
-                  <span className="text-fg-base truncate">{e.detail}</span>
+                  <span className="text-fg-base truncate">{String(e.detail ?? "")}</span>
                 </div>
               ))
             )

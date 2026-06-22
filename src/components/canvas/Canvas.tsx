@@ -31,7 +31,7 @@ export function Canvas() {
         id,
         type: "agent",
         position: AGENTS[id].position,
-        data: { def: AGENTS[id], state: agentsState?.[id] },
+        data: { def: AGENTS[id], state: (agentsState as Record<string, unknown> | undefined)?.[id] },
         draggable: true,
       })),
     [agentsState]

@@ -50,6 +50,7 @@ async function collectReal(): Promise<KafkaAdminMetrics> {
     ssl: kafka_.caCertPem
       ? { ca: [kafka_.caCertPem], rejectUnauthorized: false }
       : true,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     sasl: {
       mechanism: (kafka_.saslMechanism ?? "scram-sha-256") as
         | "scram-sha-256"
@@ -57,7 +58,7 @@ async function collectReal(): Promise<KafkaAdminMetrics> {
         | "plain",
       username: kafka_.username,
       password: kafka_.password,
-    },
+    } as any,
     logLevel: logLevel.NOTHING,
     connectionTimeout: 8_000,
     requestTimeout: 10_000,

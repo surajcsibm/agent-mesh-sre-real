@@ -712,7 +712,7 @@ function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { da
                 <DataRow label="Kafka feature">
                   <span style={{ background: "#dbeafe", color: "#1d4ed8", padding: "1px 8px",
                                  borderRadius: 4, fontSize: 11, fontWeight: 700 }}>
-                    {data.reasoning?.kafkaFeature ?? "—"}
+                    {data.reasoning?.kafkaFeatureCited ?? "—"}
                   </span>
                 </DataRow>
                 <DataRow label="Confidence"><strong>{confidence}</strong></DataRow>
@@ -887,14 +887,14 @@ function ScenarioEndModal({ data, onClose, onSendForApproval, scenarioId }: { da
               const sid = scenarioId ?? data.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
               const synth: ApprovalRequest = {
                 id: "modal-" + Date.now(),
-                ts: data.ts ?? Date.now(),
-                createdAt: data.ts ?? Date.now(),
+                ts: Date.now(),
+                createdAt: Date.now(),
                 agent: "monitor" as const,
                 proposedBy: "monitor",
                 scenarioId: sid,
                 reason: data.reasoning?.rationale ?? "Approval required for this infra-mutating action.",
                 status: "pending",
-                toolCall: data.reasoning?.proposedToolCall ?? {
+                toolCall: {
                   jsonrpc: "2.0" as const,
                   id: "modal-" + Date.now(),
                   method: "tools/call" as const,
@@ -1965,9 +1965,9 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
                 {h.scenarioLabel}
               </span>
 
-              {h.completedAt && (
+              {h.timestamp && (
                 <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0, marginLeft: 16, fontWeight: 400, whiteSpace: "nowrap" }}>
-                  {new Date(h.completedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                  {new Date(h.timestamp).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
                 </span>
               )}
               {(h as EmailSummaryData & { triggerSource?: string }).triggerSource === "manual" ? (
@@ -2010,14 +2010,14 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
                     // Synthesise from history entry so Review always works
                     const synth: ApprovalRequest = {
                       id: `hist-${i}`,
-                      ts: h.ts ?? Date.now(),
-                      createdAt: h.ts ?? Date.now(),
+                      ts: h.completedAt ?? Date.now(),
+                      createdAt: h.completedAt ?? Date.now(),
                       agent: "monitor" as const,
                       proposedBy: "monitor",
                       scenarioId,
                       reason: h.reasoning?.rationale ?? "Approval required for this infra-mutating action.",
                       status: "pending",
-                      toolCall: h.reasoning?.proposedToolCall ?? {
+                      toolCall: {
                         jsonrpc: "2.0" as const, id: `synth-${i}`, method: "tools/call" as const,
                         params: SCENARIO_TOOL_CALLS[scenarioId] ?? { name: scenarioId, arguments: {} }
                       },

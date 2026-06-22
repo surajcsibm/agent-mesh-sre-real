@@ -85,7 +85,8 @@ export async function runScenario(
             namespace,
             `strimzi.io/cluster=${cluster},strimzi.io/pool-name=controller`
           );
-          const annotated = pods.items.find(
+          const podList = (pods && typeof pods === 'object' && 'body' in pods) ? (pods as {body: {items: unknown[]}}).body.items : (pods as {items: unknown[]}).items;
+          const annotated = (podList as {metadata?: {annotations?: Record<string,string>; name?: string}}[]).find(
             (p) => p.metadata?.annotations?.["strimzi.io/kraft-controller-id"]
           );
           target = annotated?.metadata?.name ?? target;
@@ -105,7 +106,9 @@ export async function runScenario(
         "Read current share-group-consumer replicas",
         `oc get deploy/share-group-consumer -n ${namespace}`,
         async () => {
-          const dep = await client.getDeployment("share-group-consumer", namespace);
+          const depRaw = await client.getDeployment("share-group-consumer", namespace);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dep = (depRaw && typeof depRaw === 'object' && 'body' in depRaw) ? (depRaw as any).body : depRaw as any;
           next = (dep?.spec?.replicas ?? 1) + 1;
         }
       );
@@ -126,7 +129,9 @@ export async function runScenario(
         "Read current cooperative-consumer replicas",
         `oc get deploy/cooperative-consumer -n ${namespace}`,
         async () => {
-          const dep = await client.getDeployment("cooperative-consumer", namespace);
+          const depRaw = await client.getDeployment("cooperative-consumer", namespace);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dep = (depRaw && typeof depRaw === "object" && "body" in depRaw) ? (depRaw as any).body : depRaw as any;
           next = (dep?.spec?.replicas ?? 2) + 1;
         }
       );

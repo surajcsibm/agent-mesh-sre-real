@@ -222,12 +222,12 @@ function MockStrip({
       <Pill
         icon={<Database size={11} />}
         label="Brokers"
-        value={`${sim.brokers.filter((b) => b.status === "online").length}/${sim.brokers.length}`}
+        value={`${(sim.brokers ?? []).filter((b) => b.status === "online").length}/${(sim.brokers ?? []).length}`}
         tone="ok"
       />
-      <Pill icon={<Lock size={11} />} label="mTLS" value={sim.security.mTLS ? "on" : "off"} tone={sim.security.mTLS ? "ok" : "warn"} />
-      <Pill icon={<KeyRound size={11} />} label="SASL/SCRAM" value={sim.security.saslScram ? "on" : "off"} tone={sim.security.saslScram ? "ok" : "warn"} />
-      <Pill icon={<ShieldCheck size={11} />} label="ACLs" value={String(sim.security.aclsActive)} tone="ok" />
+      <Pill icon={<Lock size={11} />} label="mTLS" value={sim.security?.mTLS ? "on" : "off"} tone={sim.security?.mTLS ? "ok" : "warn"} />
+      <Pill icon={<KeyRound size={11} />} label="SASL/SCRAM" value={sim.security?.saslScram ? "on" : "off"} tone={sim.security?.saslScram ? "ok" : "warn"} />
+      <Pill icon={<ShieldCheck size={11} />} label="ACLs" value={String(sim.security?.aclsActive ?? false)} tone="ok" />
       <Pill icon={<Activity size={11} />} label="Audit" value={`${audit} writes`} tone="info" />
       <MonitorPollPill />
     </>

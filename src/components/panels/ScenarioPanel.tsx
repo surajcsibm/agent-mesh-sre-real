@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Activity,
   Eye,
-  Eye,
   AlertTriangle,
   CircuitBoard,
   Layers,
@@ -379,19 +378,19 @@ function AgentLifecycle() {
       <div className="grid grid-cols-1 gap-1.5">
         {AGENT_ORDER.filter((id) => id !== "intake-agent").map((id) => {
           const def = AGENTS[id];
-          const state = agents?.[id];
-          const isCrashed = state?.status === "crashed";
+          const state = (agents as Record<string, unknown> | undefined)?.[id];
+          const isCrashed = (state as {status?:string} | undefined)?.status === "crashed";
           return (
             <div key={id} className="flex items-center justify-between rounded-lg border border-white/10 bg-bg-elev px-2.5 py-1.5">
               <div className="flex items-center gap-2 min-w-0">
-                <span className={cn("dot", isCrashed ? "crit" : state?.status === "replaying" ? "warn" : "live")} />
+                <span className={cn("dot", isCrashed ? "crit" : (state as {status?:string}|undefined)?.status === "replaying" ? "warn" : "live")} />
                 <span className="text-[11.5px] font-medium truncate">{def.name}</span>
               </div>
               <div className="flex items-center gap-1">
                 {!isCrashed ? (
                   <button
                     disabled={busy === id}
-                    onClick={() => toggle(id, "kill")}
+                    onClick={() => toggle(id as AgentId, "kill")}
                     className="btn btn-danger !py-1 !px-2 !text-[10.5px]"
                     title="Kill agent (simulate crash)"
                   >
@@ -401,7 +400,7 @@ function AgentLifecycle() {
                 ) : (
                   <button
                     disabled={busy === id}
-                    onClick={() => toggle(id, "restart")}
+                    onClick={() => toggle(id as AgentId, "restart")}
                     className="btn btn-success !py-1 !px-2 !text-[10.5px]"
                     title="Restart and replay from last committed offset"
                   >
