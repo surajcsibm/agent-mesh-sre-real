@@ -2329,7 +2329,7 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, []);
 
-  const [extraOpen, setExtraOpen] = useState(true);
+  const [extraOpen, setExtraOpen] = useState(false);
   const det = useMonitorDetection();
   const [topicsVisible, setTopicsVisible] = useState(20);
 
@@ -2678,7 +2678,7 @@ export default function Dashboard() {
       <div className="flex flex-1 gap-0 overflow-hidden">
 
         {/* Left sidebar */}
-        <aside className="w-72 shrink-0 flex flex-col gap-5 p-4 overflow-y-auto"
+        <aside className="w-72 shrink-0 flex flex-col gap-5 p-4 overflow-y-auto" style={{ minHeight: 0, height: "100%" }}
                style={{ background: "#f8fafc", borderRight: "1px solid #dce5ef" }}>
 
           {/* Pinned Scenarios */}
