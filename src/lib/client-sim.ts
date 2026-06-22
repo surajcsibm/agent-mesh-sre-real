@@ -642,9 +642,17 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
         // ── REJECTED PATH ──────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
-          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), incidentQueueDepth: 0, scenarioRunning: false } });
           dispatch({ type: "audit", record: auditRec("monitor", "Action REJECTED by operator — kafka.checkpointShareGroup not executed, scenario aborted", "approval") });
           toast(dispatch, "🚫 Rejected — kafka.checkpointShareGroup not executed", "error");
+          sendEmail(dispatch, "share-group", "Share Group Rebalance", 18000, 18000, "Rejected — no checkpoint applied", {
+            approved: false, approvedBy: "operator",
+            reasoning: {
+              rootCause: "KIP-932 share group queue depth 18,000 — offset checkpoint required to prevent duplicate redelivery on consumer restart",
+              confidence: 0.91, kafkaFeatureCited: "KIP-932 Share Groups",
+              rationale: "Share group delivery state has diverged from committed offsets. Operator rejected checkpoint action — delivery state remains uncommitted.",
+            },
+          });
         }, 300));
       }
     });
@@ -893,7 +901,7 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
           agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
           dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(LAG), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
           dispatch({ type: "audit", record: auditRec("monitor", "Schema update rejected — manual schema rollback required", "approval") });
-          sendEmail(dispatch, "schema-mismatch", "Schema Registry Mismatch", LAG, LAG, "Rejected — no schema change applied", { approved: false, approvedBy: "operator" });
+          sendEmail(dispatch, "schema-mismatch", "Schema Registry Mismatch", LAG, LAG, "Rejected — no schema change applied", { approved: false, approvedBy: "operator", reasoning: { rootCause: "Schema Registry version conflict: producer deployed Avro v2 schema without BACKWARD_TRANSITIVE mode — consumer deserialization failing with SchemaParseException", kafkaFeatureCited: "Schema Registry", confidence: 0.93, rationale: "Producer updated Avro schema without backward-compatible evolution. Consumer deserialization fails with SchemaParseException on new fields. Schema registry compatibility mode was not enforced (BACKWARD → NONE)." } });
         }, 0));
       }
     });
@@ -1088,7 +1096,7 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
           agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
           dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(LAG), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
           dispatch({ type: "audit", record: auditRec("monitor", "Partition reassignment rejected — under-replication persists, manual intervention needed", "approval") });
-          sendEmail(dispatch, "under-replication", "Under-Replicated Partitions", LAG, LAG, "Rejected — no partition reassignment", { approved: false, approvedBy: "operator" });
+          sendEmail(dispatch, "under-replication", "Under-Replicated Partitions", LAG, LAG, "Rejected — no partition reassignment", { approved: false, approvedBy: "operator", reasoning: { rootCause: "3 partitions under-replicated on broker-2 — ISR shrunk to 1, replication factor 3 violated, risk of data loss if broker fails", kafkaFeatureCited: "KRaft Replication", confidence: 0.97, rationale: "broker-2 disk I/O saturation caused follower fetch timeout. ISR shrinkage reduces durability. Partition reassignment will move affected partitions to broker-3 to restore RF=3." } });
         }, 0));
       }
     });
