@@ -2516,8 +2516,25 @@ export default function Dashboard() {
     const isManual = lastManualTriggerRef.current === scenarioKey;
     if (isManual) lastManualTriggerRef.current = null;
     const stamped = { ...hydrated, triggerSource: isManual ? "manual" : "auto" } as EmailSummaryData & { triggerSource: string };
-    // Prepend — no dedup so every run (even same scenario) gets its own entry
-    setSummaryHistory(prev => [stamped, ...prev].slice(0, 30));
+    // Upsert by scenarioId — update existing entry if same scenario,
+    // only prepend a new entry when it is a genuinely new run (resolved/completed)
+    // vs an in-progress update (awaiting-approval → rejected/approved).
+    setSummaryHistory(prev => {
+      const existingIdx = prev.findIndex(h =>
+        (SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel) ===
+        (SCENARIO_LABEL_TO_ID[stamped.scenarioLabel] ?? stamped.scenarioLabel) &&
+        ((h as {status?: string}).status === "awaiting-approval" ||
+         (h as {status?: string}).status === "awaiting")
+      );
+      // If there's an awaiting entry for this scenario, update it in place
+      if (existingIdx !== -1) {
+        const updated = [...prev];
+        updated[existingIdx] = { ...prev[existingIdx], ...stamped };
+        return updated;
+      }
+      // Otherwise prepend as a new run
+      return [stamped, ...prev].slice(0, 30);
+    });
   }, [state.emailSummary]);
 
   const handleTopicSave = (updated: KafkaTopic) => {
