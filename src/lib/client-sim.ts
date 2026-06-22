@@ -366,7 +366,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
+      if (_globalPendingApprovals.length > 0) dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         // ── APPROVED PATH ──────────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
@@ -595,7 +595,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
+      if (_globalPendingApprovals.length > 0) dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         // ── APPROVED PATH ──────────────────────────────────────────────────
         allTimers.push(setTimeout(() => {
@@ -845,7 +845,7 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
+      if (_globalPendingApprovals.length > 0) dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
@@ -1040,7 +1040,7 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
       // Remove from pending display when resolved
       const _gIdx = _globalPendingApprovals.findIndex(a => a.id === approval.id);
       if (_gIdx >= 0) _globalPendingApprovals.splice(_gIdx, 1);
-      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
+      if (_globalPendingApprovals.length > 0) dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       if (approved) {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
@@ -1538,7 +1538,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
       dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
       const _approvalObj = { id: approvalId, toolCall, reason: rootCause, ts: Date.now() };
       _globalPendingApprovals.push(_approvalObj as ApprovalRequest);
-      dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
+      if (_globalPendingApprovals.length > 0) dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
       dispatch({ type: "audit", record: auditRec("monitor", `Approval gate: restart consumer group + scale replicas on ${topicName}. Awaiting operator sign-off.`, "approval") });
       toast(dispatch, `🔐 Approval required — healing ${topicName}`, "warning");
 

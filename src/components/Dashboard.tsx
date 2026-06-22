@@ -1929,7 +1929,7 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
       </div>
 
       <div className="space-y-1.5">
-        {history.filter(Boolean).map((h, i) => {
+        {history.filter((h): h is EmailSummaryData => !!h && typeof h.scenarioId === 'string').map((h, i) => {
           const approved  = h.approved;
           const cardColor = inferColor(h.scenarioLabel);
           const confidence = h.reasoning ? Math.round(h.reasoning.confidence * 100) : null;
@@ -2397,7 +2397,7 @@ export default function Dashboard() {
       if (saved) {
         try {
           const parsed = JSON.parse(saved) as EmailSummaryData[];
-          setSummaryHistory(parsed.filter((h) => h && h.scenarioId));
+          setSummaryHistory(parsed.filter((h): h is EmailSummaryData => !!h && typeof h.scenarioId === 'string'));
         } catch { localStorage.removeItem("sre-scenario-history"); }
       }
     } catch { /* corrupt data — ignore */ }
