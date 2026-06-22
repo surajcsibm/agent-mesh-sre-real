@@ -350,10 +350,11 @@ function runLagSpike(dispatch: DispatchFn): () => void {
       scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
       scenarioId: approval.scenarioId ?? "unknown",
       action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
-      lagBefore: 0, lagAfter: 0,
+      lagBefore: 4200, lagAfter: 4200,
       approved: false, sent: false,
       status: "awaiting-approval",
       completedAt: Date.now(),
+      reasoning: { rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions", kafkaFeatureCited: "KIP-848 Share Groups", confidence: 0.94, rationale: "Lag growth rate 420 msg/s exceeds SLO (150 msg/s). Root cause: downstream DB bottleneck stalling consumer threads during active KIP-848 rebalance. Adding 2 consumers will absorb the spike within ~10s." },
     } });
     _globalPendingApprovals.push(approval);
     dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
@@ -580,10 +581,11 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
       scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
       scenarioId: approval.scenarioId ?? "unknown",
       action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
-      lagBefore: 0, lagAfter: 0,
+      lagBefore: 18000, lagAfter: 18000,
       approved: false, sent: false,
       status: "awaiting-approval",
       completedAt: Date.now(),
+      reasoning: { rootCause: "KIP-932 share group queue depth 18,000 — offset checkpoint required to prevent duplicate redelivery on consumer restart", kafkaFeatureCited: "KIP-932 Share Groups", confidence: 0.91, rationale: "Share group delivery state has diverged from committed offsets. Checkpointing now prevents mass redelivery if any consumer restarts. Policy gate required because checkpoint mutates durable broker state." },
     } });
     _globalPendingApprovals.push(approval);
     dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
@@ -829,10 +831,11 @@ function runSchemaMismatch(dispatch: DispatchFn): () => void {
       scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
       scenarioId: approval.scenarioId ?? "unknown",
       action: `Awaiting approval: ${approval.toolCall?.method ?? "policy-gated action"}`,
-      lagBefore: 0, lagAfter: 0,
+      lagBefore: LAG, lagAfter: LAG,
       approved: false, sent: false,
       status: "awaiting-approval",
       completedAt: Date.now(),
+      reasoning: { rootCause: "Schema Registry version conflict: producer deployed Avro v2 schema without BACKWARD_TRANSITIVE mode — consumer deserialization failing with SchemaParseException", kafkaFeatureCited: "Schema Registry", confidence: 0.93, rationale: "Producer updated Avro schema without backward-compatible evolution. Consumer deserialization fails with SchemaParseException on new fields. Schema registry compatibility mode was not enforced (BACKWARD → NONE)." },
     } });
     _globalPendingApprovals.push(approval);
     dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
@@ -1027,6 +1030,7 @@ function runUnderReplication(dispatch: DispatchFn): () => void {
       approved: false, sent: false,
       status: "awaiting-approval",
       completedAt: Date.now(),
+      reasoning: { rootCause: "3 partitions under-replicated on broker-2 — ISR shrunk to 1, replication factor 3 violated, risk of data loss if broker fails", kafkaFeatureCited: "KRaft Replication", confidence: 0.97, rationale: "broker-2 disk I/O saturation caused follower fetch timeout. ISR shrinkage reduces durability. Partition reassignment will move affected partitions to broker-3 to restore RF=3. Requires approval as it triggers a leader election and brief consumer rebalance." },
     } });
     _globalPendingApprovals.push(approval);
     dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
