@@ -1997,7 +1997,7 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
               </span>
 
               {/* Send to Approval button for awaiting entries */}
-              {(h as { status?: string }).status === "awaiting-approval" && (
+              {((h as { status?: string }).status === "awaiting-approval" || (h as { status?: string }).status === "rejected") && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

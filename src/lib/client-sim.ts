@@ -1489,7 +1489,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
 
   t(0, () => {
     agents = patch(agents, "intake", { status: "acting", mralPhase: "act" });
-    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "monitor", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("intake", `${isCritical ? "🔴 CRITICAL" : "🟡 DEGRADED"} alert: ${topicName} lag=${lagTotal.toLocaleString()} — published to ops.incidents.v1`, "publish", "ops.incidents.v1") });
     particle(dispatch, "e-req", "intake", "monitor");
     toast(dispatch, `${isCritical ? "🔴 Critical" : "⚠️ Degraded"} topic detected — initiating MRAL heal cycle`, isCritical ? "error" : "warning");
@@ -1501,7 +1501,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
       status: "reasoning", mralPhase: "reason",
       lastReasoning: { rootCause, kafkaFeatureCited: isCritical ? "KIP-848" : "Consumer Groups", confidence: isCritical ? 0.93 : 0.87, rationale },
     });
-    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
+    dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
     dispatch({ type: "audit", record: auditRec("monitor", rootCause, "reasoning") });
   });
 
@@ -1549,7 +1549,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
         if (!approved) {
           delay(200, () => {
             agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
-            dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
+            dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagTotal), incidentQueueDepth: 0, scenarioRunning: false } });
             dispatch({ type: "audit", record: auditRec("monitor", `Heal action REJECTED by operator. Topic ${topicName} remains critical — manual intervention required.`, "approval") });
             toast(dispatch, `🚫 Heal rejected — ${topicName} remains critical`, "error");
             sendEmail(dispatch, "topic-heal", `Topic Heal — ${topicName}`, lagTotal, lagTotal, healAction, {
@@ -1568,14 +1568,14 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
             status: "acting", mralPhase: "act",
             lastAction: { detail: healAction, toolCalled: uid(), outcome: "success" },
           });
-          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
           dispatch({ type: "audit", record: auditRec("monitor", `✅ Approved. Executing: restart dead replica + scale +2 consumers on ${topicName}`, "tool-call") });
           particle(dispatch, "e-inc", "monitor", "writer");
         });
 
         delay(2800, () => {
           dispatch({ type: "audit", record: auditRec("monitor", `Consumer group restarted. Lag draining: ${lagTotal.toLocaleString()} → ~${lagAfter.toLocaleString()} — recovery confirmed`, "tool-call") });
-          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(Math.round(lagTotal * 0.4)), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(Math.round(lagTotal * 0.4)), incidentQueueDepth: 0 } });
           toast(dispatch, `✅ ${topicName} recovering — lag draining`, "success");
           if (onComplete) onComplete();
         });
@@ -1583,7 +1583,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
         delay(5000, () => {
           agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
           agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
-          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), incidentQueueDepth: 0 } });
           dispatch({ type: "audit", record: auditRec("writer", `Postmortem drafted: Critical recovery on ${topicName}. Lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}. RCA documented.`, "consume") });
           particle(dispatch, "e-aud", "writer", "notification");
         });
@@ -1591,7 +1591,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
         delay(7500, () => {
           agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
           agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
-          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), incidentQueueDepth: 0 } });
           dispatch({ type: "audit", record: auditRec("notification", `Slack #sre-alerts: ${topicName} recovered. ITSM INC auto-closed. Stakeholders notified.`, "notification") });
           dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Topic Healed", message: `✅ ${topicName} recovered — lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}`, scenarioId: "topic-heal" } });
           toast(dispatch, `✅ ${topicName} fully healed — lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}`, "success");
@@ -1600,14 +1600,14 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
         delay(9500, () => {
           agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
           agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
-          dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(lagAfter), incidentQueueDepth: 0 } });
           dispatch({ type: "audit", record: auditRec("monitor", `Lesson: Critical consumer failure on ${topicName}. Add liveness probe on consumer replicas. Alert at lag>10k before reaching critical.`, "lesson") });
           dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "topic-heal", actionTaken: `Consumer restart + scale +2 on ${topicName}`, notes: `Add consumer liveness probes. Alert threshold lag>10,000 for ${topicName}.` } });
         });
 
         delay(11500, () => {
           agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
-          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
+          dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagAfter), incidentQueueDepth: 0, scenarioRunning: false } });
           sendEmail(dispatch, "topic-heal", `Topic Heal — ${topicName}`, lagTotal, lagAfter, healAction, {
             approved: true, approvedBy: "operator",
             reasoning: { rootCause, kafkaFeatureCited: "KIP-848", confidence: 0.93, rationale },
@@ -1626,7 +1626,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
         status: "acting", mralPhase: "act",
         lastAction: { detail: healAction, toolCalled: uid(), outcome: "success" },
       });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
+      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
       dispatch({ type: "audit", record: auditRec("monitor", `Scaling consumer group: +${Math.max(1, Math.floor(partitions / 4))} replicas on ${topicName} — cooperative rebalance initiated`, "tool-call") });
       particle(dispatch, "e-inc", "monitor", "writer");
       if (onComplete) onComplete();
@@ -1634,14 +1634,14 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
 
     t(9000, () => {
       dispatch({ type: "audit", record: auditRec("monitor", `Lag draining: ${lagTotal.toLocaleString()} → ~${lagAfter.toLocaleString()} — consumer throughput increased by ${Math.round((1 - lagAfter / lagTotal) * 100)}%`, "tool-call") });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(Math.round(lagTotal * 0.35)), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(Math.round(lagTotal * 0.35)), incidentQueueDepth: 0 } });
       toast(dispatch, `✅ ${topicName} recovering — lag draining`, "success");
     });
 
     t(11500, () => {
       agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
       agents = patch(agents, "writer", { status: "acting", mralPhase: "act" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), incidentQueueDepth: 0 } });
       dispatch({ type: "audit", record: auditRec("writer", `Change record drafted: degraded→healthy recovery on ${topicName}. Lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}.`, "consume") });
       particle(dispatch, "e-aud", "writer", "notification");
     });
@@ -1649,7 +1649,7 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
     t(13500, () => {
       agents = patch(agents, "writer", { status: "online", mralPhase: "idle" });
       agents = patch(agents, "notification", { status: "acting", mralPhase: "act" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+      dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagAfter), incidentQueueDepth: 0 } });
       dispatch({ type: "audit", record: auditRec("notification", `Slack #kafka-ops: ${topicName} healed. Consumer scale-out successful. ITSM ticket auto-closed.`, "notification") });
       dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Topic Healed", message: `✅ ${topicName} healthy — lag ${lagTotal.toLocaleString()} → ${lagAfter.toLocaleString()}`, scenarioId: "topic-heal" } });
       toast(dispatch, `✅ ${topicName} healed — lag ${lagAfter.toLocaleString()}`, "success");
@@ -1658,14 +1658,14 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
     t(15500, () => {
       agents = patch(agents, "notification", { status: "online", mralPhase: "idle" });
       agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "learn" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
+      dispatch({ type: "state", payload: { agents, mralPhase: "learn", broker: mockBroker(lagAfter), incidentQueueDepth: 0 } });
       dispatch({ type: "audit", record: auditRec("monitor", `Lesson: Degraded ${topicName} recovered via consumer scale-out. Adjust auto-scale policy: lag>2,800 triggers +${Math.max(1, Math.floor(partitions / 4))} consumer.`, "lesson") });
       dispatch({ type: "lesson", record: { id: uid(), ts: Date.now(), scenarioId: "topic-heal", actionTaken: `Consumer scale +${Math.max(1, Math.floor(partitions / 4))} on ${topicName}`, notes: `Auto-scale policy: lag>2,800 → +1 consumer replica on ${topicName}.` } });
     });
 
     t(17500, () => {
       agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
-      dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagAfter), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
+      dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(lagAfter), incidentQueueDepth: 0, scenarioRunning: false } });
       sendEmail(dispatch, "topic-heal", `Topic Heal — ${topicName}`, lagTotal, lagAfter, healAction, {
         approved: true, approvedBy: "auto",
         reasoning: { rootCause, kafkaFeatureCited: "Consumer Groups", confidence: 0.87, rationale },
