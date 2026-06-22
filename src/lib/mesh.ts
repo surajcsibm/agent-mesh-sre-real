@@ -5,6 +5,7 @@ import { eventBus } from "./event-bus";
 import { sendAgentSummary } from "./emailer";
 import { kafkaProduceAudit, kafkaProduceLesson, kafkaProduce, TOPICS } from "./kafka";
 import { getRuntime } from "./runtime-mode";
+import { safeErr } from "./log-safe";
 import type {
   AgentState,
   BrokerState,
@@ -750,10 +751,10 @@ export function triggerScenario(id: "lag-spike" | "controller-failover" | "share
   if (s.activeScenarios.has(id)) return { ok: false, reason: "scenario_already_running" };
   s.activeScenarios.add(id);
   switch (id) {
-    case "lag-spike":           runLagSpike().catch(console.error); break;
-    case "controller-failover": runControllerFailover().catch(console.error); break;
-    case "share-group":         runShareGroup().catch(console.error); break;
-    case "benign-rebalance":    runBenignRebalance().catch(console.error); break;
+    case "lag-spike":           runLagSpike().catch((e) => console.error(`[mesh] lag-spike failed:`, safeErr(e))); break;
+    case "controller-failover": runControllerFailover().catch((e) => console.error(`[mesh] controller-failover failed:`, safeErr(e))); break;
+    case "share-group":         runShareGroup().catch((e) => console.error(`[mesh] share-group failed:`, safeErr(e))); break;
+    case "benign-rebalance":    runBenignRebalance().catch((e) => console.error(`[mesh] benign-rebalance failed:`, safeErr(e))); break;
   }
   return { ok: true };
 }

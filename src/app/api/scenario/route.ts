@@ -3,6 +3,7 @@ import { getMesh } from "@/lib/mesh";
 import { getRuntime } from "@/lib/runtime-mode";
 import { getK8s } from "@/lib/k8s/holder";
 import { runScenario, ScenarioKind } from "@/lib/k8s/scenarios";
+import { safeErr } from "@/lib/log-safe";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,7 +40,7 @@ export async function POST(req: Request): Promise<Response> {
       realResult = await runScenario(c, body.kind, r.cluster.namespace, r.cluster.name);
     } catch (e: unknown) {
       // Real cluster failure is non-fatal: the simulator already responded.
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = safeErr(e).message;
       return NextResponse.json({
         ok: true,
         sim: simOut,

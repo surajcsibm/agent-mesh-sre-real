@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getK8s } from "@/lib/k8s/holder";
 import { getKafkaTap } from "@/lib/kafka/tap";
 import { readControllerCredentials, DEFAULT_CONFIG } from "@/lib/k8s/strimzi";
+import { safeErr } from "@/lib/log-safe";
 import {
   getRuntime,
   publicView,
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { ok: false, error: safeErr(e).message },
       { status: 503 }
     );
   }

@@ -30,6 +30,7 @@ import {
   waitForReady,
 } from "@/lib/k8s/strimzi";
 import { setKubeAvailable } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
             await client.applyYaml(t.yaml, "agent-mesh-builder");
             send({ kind: "apply", phase: "topics", name: t.name, resourceKind: "KafkaTopic", status: "applied" });
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = safeErr(e).message;
             send({ kind: "apply", phase: "topics", name: t.name, resourceKind: "KafkaTopic", status: "error", message: msg });
             throw new Error(`Failed to apply KafkaTopic/${t.name}: ${msg}`);
           }
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
             await client.applyYaml(u.yaml, "agent-mesh-builder");
             send({ kind: "apply", phase: "users", name: u.name, resourceKind: "KafkaUser", status: "applied" });
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = safeErr(e).message;
             send({ kind: "apply", phase: "users", name: u.name, resourceKind: "KafkaUser", status: "error", message: msg });
             throw new Error(`Failed to apply KafkaUser/${u.name}: ${msg}`);
           }
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
 
         send({ kind: "done", ok: true });
       } catch (e: unknown) {
-        send({ kind: "error", error: e instanceof Error ? e.message : String(e) });
+        send({ kind: "error", error: safeErr(e).message });
       } finally {
         controller.close();
       }

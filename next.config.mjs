@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Allow deployment with non-blocking TS errors (k8s/broker API mismatches)
-  typescript: {
+ /* typescript: {
     ignoreBuildErrors: true,
-  },
+  },*/
 
   experimental: {
     // Next.js 14.x uses this key (renamed to serverExternalPackages in 15+)

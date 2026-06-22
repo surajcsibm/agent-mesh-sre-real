@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/lib/runtime-mode";
 import { listConsumerGroups, describeConsumerGroup } from "@/lib/kafka-admin-cfk";
+import { safeErr } from "@/lib/log-safe";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ mode: "REAL", groups });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
+      { error: safeErr(e).message },
       { status: 500 }
     );
   }

@@ -12,6 +12,7 @@
  */
 
 import type { AuditRecord, LessonRecord } from "./types";
+import { safeErr } from "./log-safe";
 
 // ── Mode detection ────────────────────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ const sslConfig = process.env.KAFKA_SSL_CA_B64
               timestamp: message.timestamp ? Number(message.timestamp) : Date.now(),
             });
           } catch (err) {
-            console.error(`[Kafka REAL] Failed to parse message on ${topic}[${partition}]`, err);
+            console.error(`[Kafka REAL] Failed to parse message on ${topic}[${partition}]`, safeErr(err));
           }
         },
       });
@@ -252,17 +253,17 @@ export async function getMeshConsumer(groupId?: string): Promise<MeshConsumer> {
 export function kafkaProduce<T>(topic: TopicName, value: T, key?: string): void {
   getMeshProducer()
     .then((p) => p.send({ topic, key, value }))
-    .catch((err) => console.error(`[Kafka] produce error on ${topic}:`, err));
+    .catch((err) => console.error(`[Kafka] produce error on ${topic}:`, safeErr(err)));
 }
 
 export function kafkaProduceAudit(record: AuditRecord): void {
   getMeshProducer()
     .then((p) => p.sendAudit(record))
-    .catch((err) => console.error("[Kafka] audit produce error:", err));
+    .catch((err) => console.error("[Kafka] audit produce error:", safeErr(err)));
 }
 
 export function kafkaProduceLesson(record: LessonRecord): void {
   getMeshProducer()
     .then((p) => p.sendLesson(record))
-    .catch((err) => console.error("[Kafka] lesson produce error:", err));
+    .catch((err) => console.error("[Kafka] lesson produce error:", safeErr(err)));
 }

@@ -44,7 +44,7 @@ export async function POST() {
           await deleteAny(c, header);
           removed.push({ kind, name, ok: true });
         } catch (e: unknown) {
-          removed.push({ kind, name, ok: false, message: e instanceof Error ? e.message : String(e) });
+          removed.push({ kind, name, ok: false, message: safeErr(e).message });
         }
       }
     }
@@ -53,13 +53,14 @@ export async function POST() {
     return NextResponse.json({ ok: true, removed });
   } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { ok: false, error: safeErr(e).message },
       { status: 503 }
     );
   }
 }
 
 import type { K8sClient } from "@/lib/k8s/client";
+import { safeErr } from "@/lib/log-safe";
 async function deleteAny(
   c: K8sClient,
   header: { apiVersion: string; kind: string; metadata: { name: string; namespace?: string } }

@@ -23,6 +23,7 @@ import {
   waitForReady,
 } from "@/lib/k8s/strimzi";
 import { getRuntime, setKafkaConnection, setKubeAvailable, setMode } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest) {
                 kind: "step",
                 step: { id: "credentials", file: "", description: "Tap connect failed" },
                 phase: "error",
-                message: e instanceof Error ? e.message : String(e),
+                message: safeErr(e).message,
               });
             }
           }
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
         send({ kind: "snapshot", snapshot: snap });
         send({ kind: "done", ok: true });
       } catch (e: unknown) {
-        send({ kind: "error", error: e instanceof Error ? e.message : String(e) });
+        send({ kind: "error", error: safeErr(e).message });
       } finally {
         controller.close();
       }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 import {
   listTopics,
   createTopic,
@@ -36,7 +37,7 @@ export async function GET() {
     return NextResponse.json({ mode: "REAL", topics, extra });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
+      { error: safeErr(e).message },
       { status: 500 }
     );
   }
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
     }
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
+      { error: safeErr(e).message },
       { status: 500 }
     );
   }

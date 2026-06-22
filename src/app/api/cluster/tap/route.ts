@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getKafkaTap } from "@/lib/kafka/tap";
 import { getRuntime } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: tap.getStatus() });
     } catch (e) {
       return NextResponse.json(
-        { ok: false, error: e instanceof Error ? e.message : String(e), status: tap.getStatus() },
+        { ok: false, error: safeErr(e).message, status: tap.getStatus() },
         { status: 500 }
       );
     }

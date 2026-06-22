@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { getK8s, lastK8sError, resetK8s } from "@/lib/k8s/holder";
 import { setKubeAvailable } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,7 @@ async function probe() {
       ok: false,
       connected: false,
       inCluster: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: safeErr(e).message,
       hint:
         lastK8sError() ??
         "Could not load a Kubernetes config. Run `oc login` (or set KUBECONFIG) and retry.",

@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getK8s } from "@/lib/k8s/holder";
 import { runScenario, ScenarioKind } from "@/lib/k8s/scenarios";
 import { getRuntime } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: result.ok, result });
   } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { ok: false, error: safeErr(e).message },
       { status: 503 }
     );
   }

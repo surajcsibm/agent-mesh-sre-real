@@ -18,6 +18,7 @@
 import "server-only";
 import { getRuntime } from "./runtime-mode";
 import { eventBus } from "./event-bus";
+import { safeErr } from "./log-safe";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -769,11 +770,11 @@ export function startMonitorPolling(): void {
 
   // Fire one cycle immediately, then repeat
   runPollCycle().catch((e) =>
-    console.error("[MonitorPoll] First cycle error:", e)
+    console.error("[MonitorPoll] First cycle error:", safeErr(e))
   );
   g.timer = setInterval(() => {
     runPollCycle().catch((e) =>
-      console.error("[MonitorPoll] Cycle error:", e)
+      console.error("[MonitorPoll] Cycle error:", safeErr(e))
     );
   }, POLL_MS);
 

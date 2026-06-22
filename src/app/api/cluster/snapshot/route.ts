@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { getK8s } from "@/lib/k8s/holder";
 import { snapshotCluster, DEFAULT_CONFIG } from "@/lib/k8s/strimzi";
 import { getRuntime } from "@/lib/runtime-mode";
+import { safeErr } from "@/lib/log-safe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export async function GET() {
     return NextResponse.json({ ok: true, snapshot: snap });
   } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { ok: false, error: safeErr(e).message },
       { status: 503 }
     );
   }
