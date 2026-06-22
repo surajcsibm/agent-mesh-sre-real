@@ -206,7 +206,7 @@ export function useMeshStream() {
     // scenario branches on approve vs reject without waiting for the server.
     resolvePendingApproval(id, decision === "approve");
     // Also notify the server (no-op on Vercel serverless, but keeps real-mode in sync).
-    fetch("/api/mesh/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, decision }) }).catch(() => {});
+    fetch("/api/mesh/approve", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ id, decision }) }).catch(() => {});
   };
 
   const agentAction = async (agentId: string, action: "kill" | "restart") => {
