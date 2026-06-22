@@ -1929,7 +1929,7 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
       </div>
 
       <div className="space-y-1.5">
-        {history.map((h, i) => {
+        {history.filter(Boolean).map((h, i) => {
           const approved  = h.approved;
           const cardColor = inferColor(h.scenarioLabel);
           const confidence = h.reasoning ? Math.round(h.reasoning.confidence * 100) : null;
