@@ -2378,8 +2378,11 @@ export default function Dashboard() {
   const [localPendingApprovals, setLocalPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [simPaused, setSimPaused] = useState(false);
   const allPendingApprovals = [
-    ...localPendingApprovals.filter(l => !state.pendingApprovals.find(s => s.id === l.id)),
-    ...state.pendingApprovals,
+    ...localPendingApprovals.filter(l =>
+      l.status === "pending" &&
+      !state.pendingApprovals.find(s => s.id === l.id)
+    ),
+    ...state.pendingApprovals.filter(a => a.status === "pending"),
   ];
   const [viewingLesson, setViewingLesson] = useState<LessonRecord | null>(null);
   const [lessonHistory, setLessonHistory]     = useState<LessonRecord[]>([]);
@@ -3076,7 +3079,19 @@ export default function Dashboard() {
         <LessonDetailModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
       )}
       {viewHistorySummary && (
-        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary?.scenarioLabel ?? ""] ?? ""} onSendForApproval={(a) => { setLocalPendingApprovals(prev => [...prev.filter(p => p.id !== a.id), a]); setViewHistorySummary(null); setReviewingApproval(a); }} />
+        <ScenarioEndModal data={viewHistorySummary} onClose={() => setViewHistorySummary(null)} scenarioId={SCENARIO_LABEL_TO_ID[viewHistorySummary?.scenarioLabel ?? ""] ?? ""} onSendForApproval={(a) => {
+                  // Add/re-add to pending approvals with fresh pending status
+                  const freshApproval = { ...a, status: "pending" as const };
+                  setLocalPendingApprovals(prev => [...prev.filter(p => p.id !== a.id && p.scenarioId !== a.scenarioId), freshApproval]);
+                  // Reset history entry back to awaiting-approval
+                  setSummaryHistory(prev => prev.map(h => {
+                    const hSid = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+                    if (hSid === a.scenarioId) return { ...h, status: "awaiting-approval", approved: false } as typeof h;
+                    return h;
+                  }));
+                  setViewHistorySummary(null);
+                  setReviewingApproval(freshApproval);
+                }} />
       )}
       {/* DEBUG */}
 
@@ -3086,16 +3101,27 @@ export default function Dashboard() {
           onDecide={(id, d) => {
             approve(id, d);
             setReviewingApproval(null);
-            setLocalPendingApprovals(prev => prev.filter(p => p.id !== id));
-            // Update summaryHistory entry to reflect the decision
-            setSummaryHistory(prev => prev.map(h => {
-              const sid = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
-              const matchesId = id.startsWith("modal-") || id.startsWith("hist-");
-              if (!matchesId) return h;
-              const hSid = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? "";
-              const approvalSid = localPendingApprovals.find(p => p.id === id)?.scenarioId ?? "";
-              if (hSid !== approvalSid && sid !== approvalSid) return h;
-              return { ...h, approved: d === "approve", status: d === "approve" ? "approved" : "rejected" } as typeof h;
+            // Mark the resolved approval in localPendingApprovals so it drops off the panel
+            setLocalPendingApprovals(prev => prev.map(p =>
+              p.id === id ? { ...p, status: d === "approve" ? "approved" : "rejected" } : p
+            ));
+            // Update matching summaryHistory entry
+            const resolvedApproval =
+              localPendingApprovals.find(p => p.id === id) ??
+              allPendingApprovals.find(p => p.id === id);
+            const resolvedScenarioId = resolvedApproval?.scenarioId ?? "";
+            setSummaryHistory(prev => prev.map((h, idx) => {
+              const hSid = SCENARIO_LABEL_TO_ID[h.scenarioLabel] ?? h.scenarioLabel.toLowerCase().replace(/\s+/g,"-");
+              // Match by scenarioId or by synthetic hist- id
+              const histId = `hist-${prev.length - 1 - idx}`;
+              if (
+                (resolvedScenarioId && hSid === resolvedScenarioId) ||
+                id === histId ||
+                id === `modal-${hSid}`
+              ) {
+                return { ...h, approved: d === "approve", status: d === "approve" ? "approved" : "rejected" } as typeof h;
+              }
+              return h;
             }));
           }}
           onClose={() => setReviewingApproval(null)}
