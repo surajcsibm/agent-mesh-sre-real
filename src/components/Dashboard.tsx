@@ -2468,7 +2468,7 @@ export default function Dashboard() {
       autoPauseTimerRef.current = setTimeout(() => {
         setSimPaused(true);
         setShowAutoPauseNotice(true);
-      }, 10 * 60 * 1000);
+      }, 5 * 60 * 1000);
     }
     return () => { if (autoPauseTimerRef.current) clearTimeout(autoPauseTimerRef.current); };
   }, [simPaused]);
@@ -3139,7 +3139,7 @@ export default function Dashboard() {
               Auto-trigger paused
             </div>
             <div style={{ fontSize:13, color:"#78350f", lineHeight:1.6, textAlign:"center", marginBottom:20 }}>
-              Auto-trigger has been automatically paused after <strong>10 minutes</strong> of activity to prevent unintended scenario accumulation. Click <strong>Resume</strong> in the left panel whenever you&apos;re ready to continue.
+              Auto-trigger has been automatically paused after <strong>5 minutes</strong> of activity to prevent unintended scenario accumulation. Click <strong>Resume</strong> in the left panel whenever you&apos;re ready to continue.
             </div>
             <button
               onClick={() => setShowAutoPauseNotice(false)}
