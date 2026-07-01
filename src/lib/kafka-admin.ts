@@ -39,7 +39,7 @@ const GROUPS_TO_PROBE = [
 async function collectReal(): Promise<KafkaAdminMetrics> {
   const rt = getRuntime();
   const kafka_ = rt.kafka;
-  if (!kafka_?.bootstrapInternal || !kafka_?.username || !kafka_?.password) {
+  if (!kafka_?.bootstrapInternal) {
     throw new Error("[KafkaAdmin] Kafka connection not configured in runtime");
   }
 
@@ -49,16 +49,20 @@ async function collectReal(): Promise<KafkaAdminMetrics> {
     brokers: kafka_.bootstrapInternal.split(",").map((s) => s.trim()),
     ssl: kafka_.caCertPem
       ? { ca: [kafka_.caCertPem], rejectUnauthorized: false }
-      : true,
+      : false,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sasl: {
-      mechanism: (kafka_.saslMechanism ?? "scram-sha-256") as
-        | "scram-sha-256"
-        | "scram-sha-512"
-        | "plain",
-      username: kafka_.username,
-      password: kafka_.password,
-    } as any,
+    ...(kafka_.username
+      ? {
+          sasl: {
+            mechanism: (kafka_.saslMechanism ?? "scram-sha-256") as
+              | "scram-sha-256"
+              | "scram-sha-512"
+              | "plain",
+            username: kafka_.username,
+            password: kafka_.password ?? "",
+          } as any,
+        }
+      : {}),
     logLevel: logLevel.NOTHING,
     connectionTimeout: 8_000,
     requestTimeout: 10_000,
