@@ -1,23 +1,30 @@
 /**
  * kafka.ts — KafkaJS bridge for Agent Mesh SRE
  *
- * Set KAFKA_MODE=REAL in .env.local to connect to a real broker (Confluent Cloud).
+ * Set KAFKA_MODE=real in .env.local to connect to a real broker.
  * Default is MOCK — all produce/consume calls are no-ops and the demo runs on the
  * in-memory event bus only.
  *
- * Confluent Cloud required env vars (KAFKA_MODE=REAL):
+ * Required env vars (KAFKA_MODE=real):
  *   KAFKA_BOOTSTRAP_SERVERS   e.g. pkc-xxxxx.us-east-1.aws.confluent.cloud:9092
- *   KAFKA_SASL_USERNAME       Confluent API Key
- *   KAFKA_SASL_PASSWORD       Confluent API Secret
+ *                             or 64.227.25.232:31090 for the local demo cluster
+ *   KAFKA_SASL_USERNAME       (optional) Confluent API Key / SASL username
+ *   KAFKA_SASL_PASSWORD       (optional) Confluent API Secret / SASL password
+ *   KAFKA_SASL_MECHANISM      (optional) plain | scram-sha-256 | scram-sha-512
+ *   KAFKA_SSL_ENABLED         (optional) "false" to disable TLS for plaintext
+ *                             brokers (e.g. the unauthenticated DO demo cluster).
+ *                             Defaults to true if unset.
+ *   KAFKA_SSL_CA_B64          (optional) base64-encoded CA cert for TLS verification
  */
 
 import type { AuditRecord, LessonRecord } from "./types";
 import { safeErr } from "./log-safe";
 
 // ── Mode detection ────────────────────────────────────────────────────────────
+// Case-insensitive: KAFKA_MODE=real, REAL, Real all activate real mode.
 
 export const KAFKA_MODE: "MOCK" | "REAL" =
-  process.env.KAFKA_MODE === "REAL" ? "REAL" : "MOCK";
+  process.env.KAFKA_MODE?.toLowerCase() === "real" ? "REAL" : "MOCK";
 
 // ── Topic registry ────────────────────────────────────────────────────────────
 
@@ -85,32 +92,47 @@ class MockConsumer implements MeshConsumer {
 
 // ── REAL KafkaJS implementation ───────────────────────────────────────────────
 
+function buildKafkaJSConfig(clientId: string) {
+  const sslEnabled = process.env.KAFKA_SSL_ENABLED?.toLowerCase() !== "false";
+
+  const sslConfig = !sslEnabled
+    ? false
+    : process.env.KAFKA_SSL_CA_B64
+      ? {
+          rejectUnauthorized: true,
+          ca: [Buffer.from(process.env.KAFKA_SSL_CA_B64, "base64").toString("utf-8")],
+        }
+      : true;
+
+  return {
+    clientId,
+    brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS!],
+    ssl: sslConfig,
+    // Only include the sasl block when credentials are actually provided —
+    // an unconditional block with undefined username/password breaks
+    // connections to unauthenticated brokers (e.g. the local/DO demo cluster).
+    ...(process.env.KAFKA_SASL_USERNAME
+      ? {
+          sasl: {
+            mechanism: (process.env.KAFKA_SASL_MECHANISM ?? "plain") as
+              | "plain"
+              | "scram-sha-256"
+              | "scram-sha-512",
+            username: process.env.KAFKA_SASL_USERNAME,
+            password: process.env.KAFKA_SASL_PASSWORD ?? "",
+          } as any,
+        }
+      : {}),
+  };
+}
+
 async function buildRealProducer(): Promise<MeshProducer> {
   const { Kafka, logLevel } = await import("kafkajs");
 
-const sslConfig = process.env.KAFKA_SSL_CA_B64
-    ? {
-        rejectUnauthorized: true,
-        ca: [Buffer.from(process.env.KAFKA_SSL_CA_B64, "base64").toString("utf-8")],
-      }
-    : true;
-
-  
   const kafka = new Kafka({
-    clientId: "agent-mesh-sre-producer",
-    brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS!],
-    ssl: sslConfig,
-    sasl: {
-      mechanism: (process.env.KAFKA_SASL_MECHANISM ?? "plain") as
-        | "plain"
-        | "scram-sha-256"
-        | "scram-sha-512",
-      username: process.env.KAFKA_SASL_USERNAME!,
-      password: process.env.KAFKA_SASL_PASSWORD!,
-    } as any,
+    ...buildKafkaJSConfig("agent-mesh-sre-producer"),
     logLevel: logLevel.WARN,
   });
- 
 
   const producer = kafka.producer({
     allowAutoTopicCreation: false,
@@ -165,25 +187,8 @@ const sslConfig = process.env.KAFKA_SSL_CA_B64
 async function buildRealConsumer(groupId = "agent-mesh-sre-monitor"): Promise<MeshConsumer> {
   const { Kafka, logLevel } = await import("kafkajs");
 
-const sslConfig = process.env.KAFKA_SSL_CA_B64
-    ? {
-        rejectUnauthorized: true,
-        ca: [Buffer.from(process.env.KAFKA_SSL_CA_B64, "base64").toString("utf-8")],
-      }
-    : true;
-
   const kafka = new Kafka({
-    clientId: "agent-mesh-sre-consumer",
-    brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS!],
-    ssl: sslConfig,
-    sasl: {
-      mechanism: (process.env.KAFKA_SASL_MECHANISM ?? "plain") as
-        | "plain"
-        | "scram-sha-256"
-        | "scram-sha-512",
-      username: process.env.KAFKA_SASL_USERNAME!,
-      password: process.env.KAFKA_SASL_PASSWORD!,
-    } as any,
+    ...buildKafkaJSConfig("agent-mesh-sre-consumer"),
     logLevel: logLevel.WARN,
   });
 
