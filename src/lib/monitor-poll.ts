@@ -647,7 +647,7 @@ function evalSignalledScenarios(
 
 // ── Poll cycle ────────────────────────────────────────────────────────────────
 
-async function runPollCycle(): Promise<void> {
+export async function runPollCycle(): Promise<void> {
   const g = getPollGlobal();
   const { state, history, activeScenarios } = g!;
 
