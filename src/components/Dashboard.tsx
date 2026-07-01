@@ -2376,7 +2376,9 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
   const [localPendingApprovals, setLocalPendingApprovals] = useState<ApprovalRequest[]>([]);
-  const [simPaused, setSimPaused] = useState(false);
+  const [simPaused, setSimPaused] = useState(true);
+  const [showAutoPauseNotice, setShowAutoPauseNotice] = useState(false);
+  const autoPauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const allPendingApprovals = [
     ...localPendingApprovals.filter(l =>
       l.status === "pending" &&
@@ -2458,8 +2460,17 @@ export default function Dashboard() {
   }, []);
 
   // Sync pause state to window so useMeshStream can check it
+  // Also schedule auto-pause after 10 minutes of active running
   React.useEffect(() => {
     (window as unknown as Record<string, unknown>).__simPaused = simPaused;
+    if (autoPauseTimerRef.current) clearTimeout(autoPauseTimerRef.current);
+    if (!simPaused) {
+      autoPauseTimerRef.current = setTimeout(() => {
+        setSimPaused(true);
+        setShowAutoPauseNotice(true);
+      }, 10 * 60 * 1000);
+    }
+    return () => { if (autoPauseTimerRef.current) clearTimeout(autoPauseTimerRef.current); };
   }, [simPaused]);
 
   // Escape key closes all open modals
@@ -2680,6 +2691,27 @@ export default function Dashboard() {
         {/* Left sidebar */}
         <aside className="w-72 shrink-0 flex flex-col gap-5 p-4 overflow-y-auto" style={{ minHeight: 0, height: "100%", background: "#f8fafc", borderRight: "1px solid #dce5ef" }}>
 
+          {/* Auto-trigger control — above scenarios */}
+          <div style={{
+            display:"flex", alignItems:"center", justifyContent:"space-between",
+            padding:"9px 12px",
+            background: simPaused ? "#fff7ed" : "#f0fdf4",
+            border: `1.5px solid ${simPaused ? "#fed7aa" : "#bbf7d0"}`,
+            borderRadius:10,
+          }}>
+            <div style={{ fontSize:11, fontWeight:700, color: simPaused ? "#c2410c" : "#15803d" }}>
+              {simPaused ? "⏸ Auto-trigger paused" : "▶ Auto-trigger active"}
+            </div>
+            <button onClick={() => setSimPaused(p => !p)} style={{
+              fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:6,
+              border:`1.5px solid ${simPaused ? "#f97316" : "#16a34a"}`,
+              background: simPaused ? "#fff7ed" : "#f0fdf4",
+              color: simPaused ? "#c2410c" : "#15803d", cursor:"pointer",
+            }}>
+              {simPaused ? "▶ Resume" : "⏸ Pause"}
+            </button>
+          </div>
+
           {/* Pinned Scenarios */}
           <div>
             <div className="text-xs font-extrabold uppercase tracking-widest mb-3"
@@ -2687,27 +2719,6 @@ export default function Dashboard() {
               Common Scenarios
             </div>
             <div className="space-y-2">
-              {/* Pause/Resume auto-trigger */}
-              <div style={{
-                display:"flex", alignItems:"center", justifyContent:"space-between",
-                padding:"8px 12px", marginBottom:8,
-                background: simPaused ? "#fff7ed" : "#f0fdf4",
-                border: `1px solid ${simPaused ? "#fed7aa" : "#bbf7d0"}`,
-                borderRadius:10,
-              }}>
-                <div style={{ fontSize:11, fontWeight:700, color: simPaused ? "#c2410c" : "#15803d" }}>
-                  {simPaused ? "⏸ Auto-trigger paused" : "▶ Auto-trigger active"}
-                </div>
-                <button onClick={() => setSimPaused(p => !p)} style={{
-                  fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:6,
-                  border:`1px solid ${simPaused ? "#f97316" : "#16a34a"}`,
-                  background: simPaused ? "#fff7ed" : "#f0fdf4",
-                  color: simPaused ? "#c2410c" : "#15803d", cursor:"pointer",
-                }}>
-                  {simPaused ? "▶ Resume" : "⏸ Pause"}
-                </button>
-              </div>
-
               {PINNED_SCENARIOS.map((s) => (
                 <button
                   key={s.id}
@@ -3110,6 +3121,39 @@ export default function Dashboard() {
                 }} />
       )}
       {/* DEBUG */}
+
+      {/* Auto-pause notice */}
+      {showAutoPauseNotice && (
+        <div style={{
+          position:"fixed", inset:0, background:"rgba(15,23,42,0.55)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          zIndex:9999,
+        }} onClick={() => setShowAutoPauseNotice(false)}>
+          <div style={{
+            background:"#fff", borderRadius:16, padding:"28px 32px", maxWidth:380,
+            boxShadow:"0 20px 60px rgba(0,0,0,0.18)",
+            border:"1px solid #fed7aa",
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize:32, marginBottom:10, textAlign:"center" }}>⏸</div>
+            <div style={{ fontSize:16, fontWeight:800, color:"#92400e", marginBottom:8, textAlign:"center" }}>
+              Auto-trigger paused
+            </div>
+            <div style={{ fontSize:13, color:"#78350f", lineHeight:1.6, textAlign:"center", marginBottom:20 }}>
+              Auto-trigger has been automatically paused after <strong>10 minutes</strong> of activity to prevent unintended scenario accumulation. Click <strong>Resume</strong> in the left panel whenever you&apos;re ready to continue.
+            </div>
+            <button
+              onClick={() => setShowAutoPauseNotice(false)}
+              style={{
+                width:"100%", padding:"10px 0", borderRadius:8,
+                background:"#f97316", color:"#fff", fontWeight:700,
+                fontSize:13, border:"none", cursor:"pointer",
+              }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
 
       {reviewingApproval && (
         <ApprovalGate
