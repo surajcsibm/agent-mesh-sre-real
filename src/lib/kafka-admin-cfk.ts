@@ -19,11 +19,7 @@ import type { ITopicConfig } from "kafkajs";
 
 // ── KafkaJS client singleton ──────────────────────────────────────────────────
 
-let _admin: Admin | null = null;
-
-function getAdmin(): Admin {
-  if (_admin) return _admin;
-
+function buildAdmin(): Admin {
   const brokers = (process.env.KAFKA_BOOTSTRAP ?? "localhost:9092").split(",");
   const mechanism = (process.env.KAFKA_SASL_MECHANISM ?? "").toLowerCase();
   const username = process.env.KAFKA_USERNAME ?? "";
@@ -59,18 +55,21 @@ function getAdmin(): Admin {
     retry: { retries: 3, initialRetryTime: 300 },
   });
 
-  _admin = kafka.admin();
-  return _admin;
+  return kafka.admin();
 }
 
+// No module-level caching of the Admin client — Vercel serverless functions
+// can share a warm instance across concurrent invocations, and a cached
+// client races between one call's disconnect() and another's in-flight
+// request, producing "write after end" errors. Each call gets its own
+// fully isolated client instead.
 async function withAdmin<T>(fn: (admin: Admin) => Promise<T>): Promise<T> {
-  const admin = getAdmin();
+  const admin = buildAdmin();
   await admin.connect();
   try {
     return await fn(admin);
   } finally {
     await admin.disconnect();
-    _admin = null; // reset so next call gets a fresh connection
   }
 }
 
