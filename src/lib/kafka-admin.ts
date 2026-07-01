@@ -84,6 +84,11 @@ async function collectReal(): Promise<KafkaAdminMetrics> {
     if (clusterRes.status === "fulfilled") {
       brokersOnline = clusterRes.value.brokers.length;
       controllerEpoch = clusterRes.value.controller ?? -1;
+    } else {
+      console.warn("[KafkaAdmin] describeCluster() rejected:", clusterRes.reason?.message ?? clusterRes.reason);
+    }
+    if (metaRes.status === "rejected") {
+      console.warn("[KafkaAdmin] fetchTopicMetadata() rejected:", metaRes.reason?.message ?? metaRes.reason);
     }
 
     // ── ISR / under-replication ──────────────────────────────────────────────
