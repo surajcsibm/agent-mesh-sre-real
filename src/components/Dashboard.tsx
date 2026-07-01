@@ -2379,13 +2379,24 @@ export default function Dashboard() {
   const [simPaused, setSimPaused] = useState(true);
   const [showAutoPauseNotice, setShowAutoPauseNotice] = useState(false);
   const autoPauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const allPendingApprovals = [
-    ...localPendingApprovals.filter(l =>
-      l.status === "pending" &&
-      !state.pendingApprovals.find(s => s.id === l.id)
-    ),
-    ...state.pendingApprovals.filter(a => a.status === "pending"),
-  ];
+  const allPendingApprovals = (() => {
+    const combined = [
+      ...localPendingApprovals.filter(l =>
+        l.status === "pending" &&
+        !state.pendingApprovals.find(s => s.id === l.id)
+      ),
+      ...state.pendingApprovals.filter(a => a.status === "pending"),
+    ];
+    // Deduplicate — keep only the latest approval per scenarioId
+    const seen = new Map<string, ApprovalRequest>();
+    for (const ap of combined) {
+      const existing = seen.get(ap.scenarioId);
+      if (!existing || (ap.ts ?? 0) > (existing.ts ?? 0)) {
+        seen.set(ap.scenarioId, ap);
+      }
+    }
+    return Array.from(seen.values());
+  })();
   const [viewingLesson, setViewingLesson] = useState<LessonRecord | null>(null);
   const [lessonHistory, setLessonHistory]     = useState<LessonRecord[]>([]);
   const [lessonHistoryMounted, setLessonHistoryMounted] = useState(false);
