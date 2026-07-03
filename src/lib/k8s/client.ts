@@ -62,30 +62,38 @@ export class K8sClient {
   }
 
   /**
-   * Try in-cluster auth, then a base64-encoded kubeconfig from
-   * KUBECONFIG_BASE64 (used on Vercel, which has no local disk kubeconfig
-   * and isn't running as a pod inside the target cluster), then finally
-   * fall back to the local ~/.kube/config / KUBECONFIG env for local dev.
+   * Priority order matters here:
+   *   1. KUBECONFIG_BASE64 — checked FIRST and explicitly, not via a
+   *      try/catch fallback. loadFromCluster() does NOT fail eagerly when
+   *      the ServiceAccount files are missing (e.g. on Vercel) — it stores
+   *      the ca.crt path as a reference and only tries to read it later,
+   *      deep inside an actual API call, well past any surrounding
+   *      try/catch here. That produced a confusing late 500 (ENOENT on
+   *      ca.crt) instead of a clean fallback. Checking this env var first
+   *      avoids ever calling loadFromCluster() on Vercel at all.
+   *   2. In-cluster ServiceAccount — only attempted if KUBECONFIG_BASE64
+   *      is unset, for the case where this app actually runs as a pod.
+   *   3. Local ~/.kube/config / KUBECONFIG env — local dev fallback.
    * Throws if none of the three work.
    */
   static async detect(): Promise<K8sClient> {
     const kc = new k8s.KubeConfig();
     let inCluster = false;
-    try {
-      // ServiceAccount mounted at /var/run/secrets/kubernetes.io/serviceaccount
-      kc.loadFromCluster();
-      inCluster = true;
-    } catch {
-      if (process.env.KUBECONFIG_BASE64) {
-        // Serverless (Vercel) path — scoped ServiceAccount kubeconfig,
-        // base64-encoded so it can live safely as a single-line env var.
-        const decoded = Buffer.from(process.env.KUBECONFIG_BASE64, "base64").toString("utf-8");
-        kc.loadFromString(decoded);
-      } else {
+
+    if (process.env.KUBECONFIG_BASE64) {
+      const decoded = Buffer.from(process.env.KUBECONFIG_BASE64, "base64").toString("utf-8");
+      kc.loadFromString(decoded);
+    } else {
+      try {
+        // ServiceAccount mounted at /var/run/secrets/kubernetes.io/serviceaccount
+        kc.loadFromCluster();
+        inCluster = true;
+      } catch {
         // Local dev path — ~/.kube/config or KUBECONFIG env
         kc.loadFromDefault();
       }
     }
+
     if (!kc.getCurrentContext()) {
       throw new Error("No active kubeconfig context found");
     }
