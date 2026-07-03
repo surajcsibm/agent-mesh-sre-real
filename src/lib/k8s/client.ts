@@ -280,8 +280,16 @@ export class K8sClient {
   }
 
   async scaleDeployment(name: string, namespace: string, replicas: number): Promise<void> {
+    // patchNamespacedDeploymentScale defaults to Content-Type: application/json
+    // when no options are passed, which the /scale subresource PATCH endpoint
+    // rejects with 415 Unsupported Media Type. Kubernetes patch endpoints need
+    // an explicit merge-patch content type — pass it via the 9th positional
+    // "options" param (client-node v0.21.0 signature: name, namespace, body,
+    // pretty, dryRun, fieldManager, fieldValidation, force, options).
     await this.apps.patchNamespacedDeploymentScale(
-      name, namespace, { spec: { replicas } }
+      name, namespace, { spec: { replicas } },
+      undefined, undefined, undefined, undefined, undefined,
+      { headers: { "Content-Type": "application/merge-patch+json" } }
     );
   }
 
