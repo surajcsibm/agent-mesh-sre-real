@@ -90,23 +90,38 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
   } catch (e) {
-    // Temporary verbose logging to diagnose the Vercel -> DigitalOcean K8s
-    // API connectivity issue. The generic "HTTP request failed" wrapper
-    // from @kubernetes/client-node hides the real cause (DNS, TLS, network
-    // policy, truncated env var, etc.) — log everything we can find here.
-    const err = e as { message?: string; name?: string; code?: string; cause?: unknown; stack?: string };
+    // @kubernetes/client-node's HttpError doesn't follow Node's standard
+    // error.code/error.cause convention — it carries statusCode/body/response
+    // instead, and the underlying network error (DNS/TLS/connection refused)
+    // is often nested inside .cause.cause or .response.errno rather than at
+    // the top level. Log every plausible location.
+    const err = e as {
+      message?: string; name?: string; code?: string; stack?: string;
+      statusCode?: number; body?: unknown;
+      cause?: { message?: string; code?: string; errno?: string; cause?: unknown };
+      response?: { statusCode?: number; body?: unknown; errno?: string };
+    };
+    let safeCause: string | undefined;
+    try { safeCause = JSON.stringify(err?.cause); } catch { safeCause = String(err?.cause); }
+    let safeResponse: string | undefined;
+    try { safeResponse = JSON.stringify(err?.response); } catch { safeResponse = String(err?.response); }
+
     console.error("[api/mesh/exec] Full error detail:", {
       message: err?.message,
       name: err?.name,
       code: err?.code,
-      cause: err?.cause,
+      statusCode: err?.statusCode,
+      body: err?.body,
+      cause: safeCause,
+      response: safeResponse,
       stack: err?.stack,
     });
     return NextResponse.json({
       error: safeErr(e).message,
       debugName: err?.name,
-      debugCode: err?.code,
-      debugCause: err?.cause ? String(err.cause) : undefined,
+      debugStatusCode: err?.statusCode,
+      debugCauseCode: err?.cause?.code ?? err?.response?.errno,
+      debugCauseMessage: err?.cause?.message,
     }, { status: 500 });
   }
 }
