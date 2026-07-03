@@ -61,7 +61,13 @@ export class K8sClient {
     this.objectApi = k8s.KubernetesObjectApi.makeApiClient(kc);
   }
 
-  /** Try in-cluster auth, fall back to kubeconfig. Throws if neither works. */
+  /**
+   * Try in-cluster auth, then a base64-encoded kubeconfig from
+   * KUBECONFIG_BASE64 (used on Vercel, which has no local disk kubeconfig
+   * and isn't running as a pod inside the target cluster), then finally
+   * fall back to the local ~/.kube/config / KUBECONFIG env for local dev.
+   * Throws if none of the three work.
+   */
   static async detect(): Promise<K8sClient> {
     const kc = new k8s.KubeConfig();
     let inCluster = false;
@@ -70,8 +76,15 @@ export class K8sClient {
       kc.loadFromCluster();
       inCluster = true;
     } catch {
-      // fall back to ~/.kube/config / KUBECONFIG env
-      kc.loadFromDefault();
+      if (process.env.KUBECONFIG_BASE64) {
+        // Serverless (Vercel) path — scoped ServiceAccount kubeconfig,
+        // base64-encoded so it can live safely as a single-line env var.
+        const decoded = Buffer.from(process.env.KUBECONFIG_BASE64, "base64").toString("utf-8");
+        kc.loadFromString(decoded);
+      } else {
+        // Local dev path — ~/.kube/config or KUBECONFIG env
+        kc.loadFromDefault();
+      }
     }
     if (!kc.getCurrentContext()) {
       throw new Error("No active kubeconfig context found");

@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { getRuntime } from "@/lib/runtime-mode";
 import { kafkaProduceAudit } from "@/lib/kafka";
 import { updateTopicRetention } from "@/lib/kafka-admin-cfk";
+import { getK8s } from "@/lib/k8s/holder";
 import { safeErr } from "@/lib/log-safe";
 import type { AuditRecord } from "@/lib/types";
+
+const DEMO_CONSUMER_DEPLOYMENT = "demo-consumer";
+const DEMO_CONSUMER_NAMESPACE = "confluent";
+const DEMO_CONSUMER_LABEL = "app=demo-consumer";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +64,27 @@ export async function POST(req: Request) {
         }
         await updateTopicRetention(body.topicName, body.retentionMs);
         return NextResponse.json({ ok: true, action: body.action, topicName: body.topicName });
+      }
+      case "scale-consumer-group": {
+        const replicas = (body as { replicas?: number }).replicas;
+        if (replicas === undefined || replicas < 0) {
+          return NextResponse.json({ error: "replicas (>=0) required" }, { status: 400 });
+        }
+        const k8s = await getK8s();
+        await k8s.scaleDeployment(DEMO_CONSUMER_DEPLOYMENT, DEMO_CONSUMER_NAMESPACE, replicas);
+        return NextResponse.json({ ok: true, action: body.action, replicas });
+      }
+      case "restart-consumer-group": {
+        const k8s = await getK8s();
+        const podList = await k8s.listPods(DEMO_CONSUMER_NAMESPACE, DEMO_CONSUMER_LABEL);
+        const pods = (podList as { body?: { items?: { metadata?: { name?: string } }[] } }).body?.items
+          ?? (podList as { items?: { metadata?: { name?: string } }[] }).items
+          ?? [];
+        const names = pods.map((p) => p.metadata?.name).filter((n): n is string => !!n);
+        for (const name of names) {
+          await k8s.deletePod(name, DEMO_CONSUMER_NAMESPACE);
+        }
+        return NextResponse.json({ ok: true, action: body.action, restartedPods: names });
       }
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
