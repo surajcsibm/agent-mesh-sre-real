@@ -90,6 +90,23 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
   } catch (e) {
-    return NextResponse.json({ error: safeErr(e).message }, { status: 500 });
+    // Temporary verbose logging to diagnose the Vercel -> DigitalOcean K8s
+    // API connectivity issue. The generic "HTTP request failed" wrapper
+    // from @kubernetes/client-node hides the real cause (DNS, TLS, network
+    // policy, truncated env var, etc.) — log everything we can find here.
+    const err = e as { message?: string; name?: string; code?: string; cause?: unknown; stack?: string };
+    console.error("[api/mesh/exec] Full error detail:", {
+      message: err?.message,
+      name: err?.name,
+      code: err?.code,
+      cause: err?.cause,
+      stack: err?.stack,
+    });
+    return NextResponse.json({
+      error: safeErr(e).message,
+      debugName: err?.name,
+      debugCode: err?.code,
+      debugCause: err?.cause ? String(err.cause) : undefined,
+    }, { status: 500 });
   }
 }
