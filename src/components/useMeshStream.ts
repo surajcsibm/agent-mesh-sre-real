@@ -236,7 +236,79 @@ export function useMeshStream() {
     }
   };
 
-  const triggerTopicAction = (payload: TopicChangePayload) => {
+  const triggerTopicAction = async (payload: TopicChangePayload) => {
+    // "create" and "delete" hit the real cluster (kafka-admin-cfk.ts via
+    // /api/admin/topics) before the MRAL animation plays. If the real call
+    // fails, show an error and skip the animation rather than narrating a
+    // change that didn't actually happen.
+    //
+    // "edit" stays simulation-only: real Kafka can't decrease partition
+    // count or arbitrarily change replication factor without reassignment
+    // tooling this app doesn't have. Only retention could be made real
+    // later via alterConfigs — not yet wired.
+    if (payload.operation === "edit" && payload.prevTopic && payload.prevTopic.partitions === payload.topic.partitions) {
+      // Only retention can be verified safe to make real here: TopicChangePayload's
+      // prevTopic only tracks name+partitions, not the prior replication factor, so
+      // we can't detect an RF change from this payload alone. Partition-count changes
+      // are excluded outright — Kafka's Admin API can't decrease partitions, and this
+      // app has no reassignment tooling for increases either. If partitions match,
+      // we treat this as a retention-only edit and make the real alterConfigs call;
+      // any RF change riding along in the same edit will NOT be reflected on the
+      // real cluster even though the animation may narrate it. Known limitation.
+      try {
+        const res = await fetch("/api/mesh/exec", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            action: "update-topic-retention",
+            topicName: payload.topic.name,
+            retentionMs: payload.topic.retentionHours * 3600000,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.error) {
+          const id = ++toastId;
+          dispatch({ type: "toast", message: `❌ Real cluster retention update failed for ${payload.topic.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+          setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+        }
+      } catch (e) {
+        const id = ++toastId;
+        dispatch({ type: "toast", message: `❌ Real cluster retention update failed for ${payload.topic.name}: ${(e as Error).message}`, kind: "error", id });
+        setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+      }
+    } else if (payload.operation === "create" || payload.operation === "delete") {
+      try {
+        const res = await fetch("/api/admin/topics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(
+            payload.operation === "create"
+              ? {
+                  action: "create",
+                  name: payload.topic.name,
+                  partitions: payload.topic.partitions,
+                  replication: payload.topic.replicationFactor,
+                  retentionMs: payload.topic.retentionHours * 3600000,
+                }
+              : { action: "delete", name: payload.topic.name }
+          ),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.error) {
+          const id = ++toastId;
+          dispatch({ type: "toast", message: `❌ Real cluster ${payload.operation} failed for ${payload.topic.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+          setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+          return; // don't run the MRAL animation for something that didn't happen
+        }
+      } catch (e) {
+        const id = ++toastId;
+        dispatch({ type: "toast", message: `❌ Real cluster ${payload.operation} failed for ${payload.topic.name}: ${(e as Error).message}`, kind: "error", id });
+        setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+        return;
+      }
+    }
     runTopicManagement(payload, dispatch as (a: SimAction) => void);
   };
 

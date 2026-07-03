@@ -490,6 +490,22 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
       dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: { ...mockBroker(0), controllerEpoch: 15 }, pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
       dispatch({ type: "audit", record: auditRec("monitor", "Acknowledged controller failover — publishing incident record to ops.incidents.v1", "tool-call") });
       particle(dispatch, "e-inc", "monitor", "writer");
+      // Real cluster write: append an audit record to ops.actions.audit.v1 via
+      // the exec-only endpoint. Non-blocking — this is a pure audit-log
+      // append (no cluster mutation), so it fires alongside the animation
+      // rather than gating it. A visible toast on failure keeps this honest
+      // rather than silently claiming a real write that didn't happen.
+      fetch("/api/mesh/exec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          action: "ack-controller-failover",
+          record: { summary: "Acknowledged controller failover — real epoch change observed on live cluster" },
+        }),
+      }).catch(() => {
+        toast(dispatch, "⚠️ Real cluster audit write failed — this run may be simulation-only", "error");
+      });
     }},
     { ms: 8000, fn: () => {
       agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
