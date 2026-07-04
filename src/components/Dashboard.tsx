@@ -1714,11 +1714,17 @@ function TopicModal({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Partitions</label>
-                  <input type="number" min={1} max={64}
+                  <input type="number" min={topic.partitions} max={64}
                     className="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400"
                     value={draft.partitions}
-                    onChange={(e) => setDraft({ ...draft, partitions: parseInt(e.target.value) || 1 })}
+                    onChange={(e) => setDraft({ ...draft, partitions: Math.max(topic.partitions, parseInt(e.target.value) || topic.partitions) })}
                   />
+                  {/* Kafka cannot decrease partition count on a live topic — messages
+                      are hash-distributed across partitions, so removing one means
+                      either data loss or a full migration no Kafka client/CLI exposes
+                      as a live operation. The min bound and clamp above enforce this;
+                      this is a real protocol limit, not an unbuilt feature. */}
+                  <p className="text-[10px] text-slate-400 mt-1">Can only increase (currently {topic.partitions})</p>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Replicas</label>

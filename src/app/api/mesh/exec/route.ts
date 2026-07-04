@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/lib/runtime-mode";
 import { kafkaProduceAudit } from "@/lib/kafka";
-import { updateTopicRetention } from "@/lib/kafka-admin-cfk";
+import { updateTopicRetention, increaseTopicPartitions } from "@/lib/kafka-admin-cfk";
 import { getK8s } from "@/lib/k8s/holder";
 import { safeErr } from "@/lib/log-safe";
 import type { AuditRecord } from "@/lib/types";
@@ -64,6 +64,14 @@ export async function POST(req: Request) {
         }
         await updateTopicRetention(body.topicName, body.retentionMs);
         return NextResponse.json({ ok: true, action: body.action, topicName: body.topicName });
+      }
+      case "increase-topic-partitions": {
+        const newCount = (body as { newPartitionCount?: number }).newPartitionCount;
+        if (!body.topicName || newCount === undefined) {
+          return NextResponse.json({ error: "topicName and newPartitionCount required" }, { status: 400 });
+        }
+        await increaseTopicPartitions(body.topicName, newCount);
+        return NextResponse.json({ ok: true, action: body.action, topicName: body.topicName, newPartitionCount: newCount });
       }
       case "scale-consumer-group": {
         const replicas = (body as { replicas?: number }).replicas;

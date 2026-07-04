@@ -144,6 +144,23 @@ export async function describeTopic(topicName: string): Promise<{
   });
 }
 
+export async function increaseTopicPartitions(
+  topicName: string,
+  newPartitionCount: number
+): Promise<void> {
+  // Kafka can only ever increase partition count for a topic — decreasing
+  // is not supported by the protocol (messages are hash-distributed across
+  // partitions; removing one means either data loss or a full migration no
+  // Kafka client/CLI exposes as a live operation). Callers must guarantee
+  // newPartitionCount is >= the topic's current partition count; the Admin
+  // API itself will reject the call otherwise.
+  await withAdmin(async (admin) => {
+    await admin.createPartitions({
+      topicPartitions: [{ topic: topicName, count: newPartitionCount }],
+    });
+  });
+}
+
 export async function updateTopicRetention(
   topicName: string,
   retentionMs: number
