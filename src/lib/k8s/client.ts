@@ -408,7 +408,13 @@ export class K8sClient {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        reject(e);
+        // The underlying exec/WebSocket rejection isn't always a proper
+        // Error instance (can be a raw Kubernetes Status object or a ws
+        // library error event) — wrap it in a real Error with full detail
+        // preserved in the message so it survives JSON.stringify downstream.
+        let detail = "(unserializable)";
+        try { detail = JSON.stringify(e, e instanceof Error ? Object.getOwnPropertyNames(e) : undefined); } catch { detail = String(e); }
+        reject(new Error(`execInPod rejected (pod=${podName}, container=${containerName}): ${detail}`));
       });
     });
   }

@@ -128,38 +128,23 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
   } catch (e) {
-    // @kubernetes/client-node's HttpError doesn't follow Node's standard
-    // error.code/error.cause convention — it carries statusCode/body/response
-    // instead, and the underlying network error (DNS/TLS/connection refused)
-    // is often nested inside .cause.cause or .response.errno rather than at
-    // the top level. Log every plausible location.
-    const err = e as {
-      message?: string; name?: string; code?: string; stack?: string;
-      statusCode?: number; body?: unknown;
-      cause?: { message?: string; code?: string; errno?: string; cause?: unknown };
-      response?: { statusCode?: number; body?: unknown; errno?: string };
-    };
-    let safeCause: string | undefined;
-    try { safeCause = JSON.stringify(err?.cause); } catch { safeCause = String(err?.cause); }
-    let safeResponse: string | undefined;
-    try { safeResponse = JSON.stringify(err?.response); } catch { safeResponse = String(err?.response); }
+    // JSON.stringify(e) on a plain Error produces "{}" — message/stack are
+    // non-enumerable on Error.prototype and get skipped by default. Using
+    // Object.getOwnPropertyNames(e) as the replacer forces inclusion of
+    // those own-but-non-enumerable properties, so we actually see what
+    // failed instead of an opaque empty object.
+    let fullSerialized = "(unserializable)";
+    try {
+      fullSerialized = JSON.stringify(e, e instanceof Error ? Object.getOwnPropertyNames(e) : undefined);
+    } catch { /* ignore */ }
 
-    console.error("[api/mesh/exec] Full error detail:", {
-      message: err?.message,
-      name: err?.name,
-      code: err?.code,
-      statusCode: err?.statusCode,
-      body: err?.body,
-      cause: safeCause,
-      response: safeResponse,
-      stack: err?.stack,
-    });
+    console.error("[api/mesh/exec] Full error detail:", fullSerialized, "raw:", e);
+
     return NextResponse.json({
       error: safeErr(e).message,
-      debugName: err?.name,
-      debugStatusCode: err?.statusCode,
-      debugCauseCode: err?.cause?.code ?? err?.response?.errno,
-      debugCauseMessage: err?.cause?.message,
+      debugFull: fullSerialized,
+      debugType: typeof e,
+      debugIsError: e instanceof Error,
     }, { status: 500 });
   }
 }
