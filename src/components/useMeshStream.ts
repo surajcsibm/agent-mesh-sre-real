@@ -246,7 +246,35 @@ export function useMeshStream() {
     // count or arbitrarily change replication factor without reassignment
     // tooling this app doesn't have. Only retention could be made real
     // later via alterConfigs — not yet wired.
-    if (payload.operation === "edit" && payload.prevTopic && payload.prevTopic.partitions === payload.topic.partitions) {
+    if (payload.operation === "edit" && payload.prevTopic && payload.prevTopic.partitions < payload.topic.partitions) {
+      // Real partition increase. The UI's min-bound clamp (Dashboard.tsx)
+      // already prevents submitting a decrease, but this check is a second,
+      // independent guard against any path that could bypass the UI clamp
+      // (e.g. a direct API call) — increaseTopicPartitions() itself will
+      // also reject a decrease at the Kafka Admin API level as a third layer.
+      try {
+        const res = await fetch("/api/mesh/exec", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            action: "increase-topic-partitions",
+            topicName: payload.topic.name,
+            newPartitionCount: payload.topic.partitions,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.error) {
+          const id = ++toastId;
+          dispatch({ type: "toast", message: `❌ Real partition increase failed for ${payload.topic.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+          setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+        }
+      } catch (e) {
+        const id = ++toastId;
+        dispatch({ type: "toast", message: `❌ Real partition increase failed for ${payload.topic.name}: ${(e as Error).message}`, kind: "error", id });
+        setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+      }
+    } else if (payload.operation === "edit" && payload.prevTopic && payload.prevTopic.partitions === payload.topic.partitions) {
       // Only retention can be verified safe to make real here: TopicChangePayload's
       // prevTopic only tracks name+partitions, not the prior replication factor, so
       // we can't detect an RF change from this payload alone. Partition-count changes
