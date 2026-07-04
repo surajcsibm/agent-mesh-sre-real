@@ -409,18 +409,22 @@ export class K8sClient {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        // JSON.stringify produced "{}" even with getOwnPropertyNames — the
-        // rejection here isn't a normal Error, it's very likely a raw
-        // WebSocket close/error event or an HTTP-upgrade-failure response
-        // from the underlying ws library, where the real fields live on the
-        // prototype chain or as getters rather than own enumerable data
-        // properties. util.inspect (unlike JSON.stringify) can actually see
-        // those — it's Node's own tool for exactly this situation.
+        // Confirmed shape via util.inspect: has `target`/`type` getters —
+        // this is a WHATWG-style ErrorEvent (WebSocket connection/upgrade
+        // failure), not a plain Error. Pull its real fields directly rather
+        // than fighting generic inspection against circular getters.
+        const ee = e as { type?: string; message?: string; error?: unknown; target?: { readyState?: number; url?: string } };
         let detail: string;
-        try {
-          detail = inspect(e, { depth: 6, showHidden: true, breakLength: 300 });
-        } catch (inspectErr) {
-          detail = `(inspect failed: ${String(inspectErr)}) raw type=${typeof e}, constructor=${e?.constructor?.name ?? "unknown"}`;
+        if (ee && typeof ee === "object" && "type" in ee) {
+          const targetInfo = ee.target ? `readyState=${ee.target.readyState}, url=${ee.target.url}` : "no target";
+          const innerError = ee.error ? (ee.error instanceof Error ? ee.error.message : String(ee.error)) : "none";
+          detail = `ErrorEvent: type=${ee.type}, message=${ee.message ?? "(none)"}, error=${innerError}, target(${targetInfo})`;
+        } else {
+          try {
+            detail = inspect(e, { depth: 6, showHidden: true, breakLength: 300 });
+          } catch (inspectErr) {
+            detail = `(inspect failed: ${String(inspectErr)}) raw type=${typeof e}, constructor=${e?.constructor?.name ?? "unknown"}`;
+          }
         }
         reject(new Error(`execInPod rejected (pod=${podName}, container=${containerName}): ${detail}`));
       });
