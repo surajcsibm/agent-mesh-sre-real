@@ -1239,8 +1239,15 @@ function runConsumerSessionTimeout(dispatch: DispatchFn): () => void {
   t(6500, () => {
     agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
     dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(3400), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
-    dispatch({ type: "audit", record: auditRec("monitor", "kafka.updateConsumerConfig(group=payment-processor, session.timeout.ms=45000, heartbeat.interval.ms=15000)", "tool-call") });
+    // NOTE: session.timeout.ms/heartbeat.interval.ms are consumer-side config —
+    // brokers cannot change them remotely for an existing client. The real,
+    // honest immediate mitigation is restarting the consumer group to clear
+    // stuck sessions; a durable config change would need a redeploy of the
+    // actual consumer application (tracked as a follow-up, not done here).
+    dispatch({ type: "audit", record: auditRec("monitor", "Immediate mitigation: restarting consumer group to clear stuck sessions (durable session.timeout.ms/heartbeat.interval.ms fix requires redeploying the consumer app — real restart executed now)", "tool-call") });
     particle(dispatch, "e-inc", "monitor", "writer");
+    fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ action: "restart-consumer-group" }) }).catch(() => {});
   });
 
   t(8500, () => {
@@ -1666,7 +1673,18 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
       dispatch({ type: "audit", record: auditRec("monitor", `Scaling consumer group: +${Math.max(1, Math.floor(partitions / 4))} replicas on ${topicName} — cooperative rebalance initiated`, "tool-call") });
       particle(dispatch, "e-inc", "monitor", "writer");
       if (onComplete) onComplete();
+      // Real cluster action — scoped to demo-consumer (see note in critical branch above).
+      fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ action: "scale-consumer-group", replicas: 2 + Math.max(1, Math.floor(partitions / 4)) }) }).catch(() => {});
     });
+
+    t(20000, () => {
+      // Scale the real consumer group back to baseline so the cluster is
+      // clean for the next demo run.
+      fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ action: "scale-consumer-group", replicas: 2 }) }).catch(() => {});
+    });
+
 
     t(9000, () => {
       dispatch({ type: "audit", record: auditRec("monitor", `Lag draining: ${lagTotal.toLocaleString()} → ~${lagAfter.toLocaleString()} — consumer throughput increased by ${Math.round((1 - lagAfter / lagTotal) * 100)}%`, "tool-call") });

@@ -320,7 +320,15 @@ export class K8sClient {
   }
 
   async listPods(namespace: string, labelSelector?: string) {
-    return this.core.listNamespacedPod(namespace, undefined, undefined, undefined, labelSelector);
+    // Pre-existing bug: labelSelector was being passed into the fieldSelector
+    // slot (5th positional param). listNamespacedPod's real signature is
+    // (namespace, pretty, allowWatchBookmarks, _continue, fieldSelector,
+    // labelSelector, ...) — labelSelector is the 6th param. Kubernetes'
+    // fieldSelector only supports a small fixed set of fields (metadata.name,
+    // status.phase, etc.), not arbitrary label keys, so passing "app=x" there
+    // was rejected with a 400. This went unnoticed until the first real
+    // caller (restart-consumer-group) actually exercised this path.
+    return this.core.listNamespacedPod(namespace, undefined, undefined, undefined, undefined, labelSelector);
   }
 
   async getSecretData(name: string, namespace: string): Promise<Record<string, Buffer> | null> {
