@@ -26,3 +26,6 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 src/lib/mesh.ts.bak
+agent-mesh-sre-do-kubeconfig.yaml
+*.kubeconfig.yaml
+*-kubeconfig.yaml
