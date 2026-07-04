@@ -409,22 +409,20 @@ export class K8sClient {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        // Confirmed shape via util.inspect: has `target`/`type` getters —
-        // this is a WHATWG-style ErrorEvent (WebSocket connection/upgrade
-        // failure), not a plain Error. Pull its real fields directly rather
-        // than fighting generic inspection against circular getters.
-        const ee = e as { type?: string; message?: string; error?: unknown; target?: { readyState?: number; url?: string } };
+        // SECURITY: never inspect this object with showHidden/deep recursion
+        // again — it walks into the underlying ClientRequest, which carries
+        // the live Authorization: Bearer token in its raw headers. That
+        // exact mistake leaked a real credential into logs and an API
+        // response earlier. Extract ONLY the specific safe fields we need.
+        const ee = e as { type?: string; message?: string; error?: unknown; target?: { readyState?: number; _closeCode?: number } };
         let detail: string;
         if (ee && typeof ee === "object" && "type" in ee) {
-          const targetInfo = ee.target ? `readyState=${ee.target.readyState}, url=${ee.target.url}` : "no target";
+          const closeCode = ee.target?._closeCode;
+          const readyState = ee.target?.readyState;
           const innerError = ee.error ? (ee.error instanceof Error ? ee.error.message : String(ee.error)) : "none";
-          detail = `ErrorEvent: type=${ee.type}, message=${ee.message ?? "(none)"}, error=${innerError}, target(${targetInfo})`;
+          detail = `WebSocket ErrorEvent: type=${ee.type}, message=${ee.message ?? "(none)"}, closeCode=${closeCode ?? "unknown"}, readyState=${readyState ?? "unknown"}, error=${innerError}`;
         } else {
-          try {
-            detail = inspect(e, { depth: 6, showHidden: true, breakLength: 300 });
-          } catch (inspectErr) {
-            detail = `(inspect failed: ${String(inspectErr)}) raw type=${typeof e}, constructor=${e?.constructor?.name ?? "unknown"}`;
-          }
+          detail = `non-ErrorEvent rejection, type=${typeof e}, constructor=${e?.constructor?.name ?? "unknown"} (no further inspection — see security note above)`;
         }
         reject(new Error(`execInPod rejected (pod=${podName}, container=${containerName}): ${detail}`));
       });
