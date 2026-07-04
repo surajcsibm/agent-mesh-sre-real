@@ -1728,11 +1728,17 @@ function TopicModal({
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Replicas</label>
-                  <input type="number" min={1} max={5}
+                  {/* max=3 matches this cluster's real broker count — Kafka
+                      cannot replicate a partition onto more brokers than
+                      exist. If this app ever targets a differently-sized
+                      cluster, this should come from a live describeCluster()
+                      call instead of a hardcoded number. */}
+                  <input type="number" min={1} max={3}
                     className="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400"
                     value={draft.replicationFactor}
-                    onChange={(e) => setDraft({ ...draft, replicationFactor: parseInt(e.target.value) || 1 })}
+                    onChange={(e) => setDraft({ ...draft, replicationFactor: Math.min(3, parseInt(e.target.value) || 1) })}
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">Max 3 (this cluster's broker count)</p>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Retention (h)</label>
@@ -2572,7 +2578,7 @@ export default function Dashboard() {
     const payload: TopicChangePayload = {
       operation: "edit",
       topic: { name: updated.name, partitions: updated.partitions, replicationFactor: updated.replicationFactor, retentionHours: updated.retentionHours },
-      prevTopic: { name: prev.name, partitions: prev.partitions },
+      prevTopic: { name: prev.name, partitions: prev.partitions, replicationFactor: prev.replicationFactor, retentionHours: prev.retentionHours },
     };
     triggerTopicAction(payload);
   };

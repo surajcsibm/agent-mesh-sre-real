@@ -1396,7 +1396,7 @@ function runCompactionLag(dispatch: DispatchFn): () => void {
 export interface TopicChangePayload {
   operation: "edit" | "delete" | "create";
   topic: { name: string; partitions: number; replicationFactor: number; retentionHours: number };
-  prevTopic?: { name: string; partitions: number };
+  prevTopic?: { name: string; partitions: number; replicationFactor: number; retentionHours: number };
 }
 
 export function runTopicManagement(payload: TopicChangePayload, dispatch: DispatchFn): () => void {

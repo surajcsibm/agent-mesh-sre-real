@@ -246,43 +246,60 @@ export function useMeshStream() {
     // count or arbitrarily change replication factor without reassignment
     // tooling this app doesn't have. Only retention could be made real
     // later via alterConfigs — not yet wired.
-    if (payload.operation === "edit" && payload.prevTopic && payload.prevTopic.partitions < payload.topic.partitions) {
-      // Real partition increase. The UI's min-bound clamp (Dashboard.tsx)
-      // already prevents submitting a decrease, but this check is a second,
-      // independent guard against any path that could bypass the UI clamp
-      // (e.g. a direct API call) — increaseTopicPartitions() itself will
-      // also reject a decrease at the Kafka Admin API level as a third layer.
-      try {
-        const res = await fetch("/api/mesh/exec", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            action: "increase-topic-partitions",
-            topicName: payload.topic.name,
-            newPartitionCount: payload.topic.partitions,
-          }),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.error) {
+    if (payload.operation === "edit" && payload.prevTopic) {
+      const prev = payload.prevTopic;
+      const next = payload.topic;
+
+      if (prev.partitions < next.partitions) {
+        try {
+          const res = await fetch("/api/mesh/exec", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              action: "increase-topic-partitions",
+              topicName: next.name,
+              newPartitionCount: next.partitions,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || body.error) {
+            const id = ++toastId;
+            dispatch({ type: "toast", message: `❌ Real partition increase failed for ${next.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+            setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+          }
+        } catch (e) {
           const id = ++toastId;
-          dispatch({ type: "toast", message: `❌ Real partition increase failed for ${payload.topic.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+          dispatch({ type: "toast", message: `❌ Real partition increase failed for ${next.name}: ${(e as Error).message}`, kind: "error", id });
           setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
         }
-      } catch (e) {
-        const id = ++toastId;
-        dispatch({ type: "toast", message: `❌ Real partition increase failed for ${payload.topic.name}: ${(e as Error).message}`, kind: "error", id });
-        setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
       }
-    } else if (payload.operation === "edit" && payload.prevTopic && payload.prevTopic.partitions === payload.topic.partitions) {
-      // Only retention can be verified safe to make real here: TopicChangePayload's
-      // prevTopic only tracks name+partitions, not the prior replication factor, so
-      // we can't detect an RF change from this payload alone. Partition-count changes
-      // are excluded outright — Kafka's Admin API can't decrease partitions, and this
-      // app has no reassignment tooling for increases either. If partitions match,
-      // we treat this as a retention-only edit and make the real alterConfigs call;
-      // any RF change riding along in the same edit will NOT be reflected on the
-      // real cluster even though the animation may narrate it. Known limitation.
+
+      if (prev.replicationFactor !== next.replicationFactor) {
+        try {
+          const res = await fetch("/api/mesh/exec", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              action: "change-topic-replication-factor",
+              topicName: next.name,
+              newReplicationFactor: next.replicationFactor,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || body.error) {
+            const id = ++toastId;
+            dispatch({ type: "toast", message: `❌ Real replication factor change failed for ${next.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+            setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+          }
+        } catch (e) {
+          const id = ++toastId;
+          dispatch({ type: "toast", message: `❌ Real replication factor change failed for ${next.name}: ${(e as Error).message}`, kind: "error", id });
+          setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
+        }
+      }
+
       try {
         const res = await fetch("/api/mesh/exec", {
           method: "POST",
@@ -290,19 +307,19 @@ export function useMeshStream() {
           credentials: "include",
           body: JSON.stringify({
             action: "update-topic-retention",
-            topicName: payload.topic.name,
-            retentionMs: payload.topic.retentionHours * 3600000,
+            topicName: next.name,
+            retentionMs: next.retentionHours * 3600000,
           }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.error) {
           const id = ++toastId;
-          dispatch({ type: "toast", message: `❌ Real cluster retention update failed for ${payload.topic.name}: ${body.error ?? res.statusText}`, kind: "error", id });
+          dispatch({ type: "toast", message: `❌ Real cluster retention update failed for ${next.name}: ${body.error ?? res.statusText}`, kind: "error", id });
           setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
         }
       } catch (e) {
         const id = ++toastId;
-        dispatch({ type: "toast", message: `❌ Real cluster retention update failed for ${payload.topic.name}: ${(e as Error).message}`, kind: "error", id });
+        dispatch({ type: "toast", message: `❌ Real cluster retention update failed for ${next.name}: ${(e as Error).message}`, kind: "error", id });
         setTimeout(() => dispatch({ type: "dismissToast", id }), 7000);
       }
     } else if (payload.operation === "create" || payload.operation === "delete") {

@@ -161,6 +161,57 @@ export async function increaseTopicPartitions(
   });
 }
 
+export async function changeTopicReplicationFactor(
+  topicName: string,
+  newReplicationFactor: number
+): Promise<{ partitionsReassigned: number }> {
+  return withAdmin(async (admin) => {
+    const cluster = await admin.describeCluster();
+    const allBrokerIds = cluster.brokers.map((b) => b.nodeId).sort((a, b) => a - b);
+
+    if (newReplicationFactor > allBrokerIds.length) {
+      throw new Error(
+        `Requested replication factor ${newReplicationFactor} exceeds the cluster's broker count (${allBrokerIds.length}). Kafka cannot replicate a partition onto more brokers than exist.`
+      );
+    }
+    if (newReplicationFactor < 1) {
+      throw new Error("Replication factor must be at least 1.");
+    }
+
+    const metadata = await admin.fetchTopicMetadata({ topics: [topicName] });
+    const topicMeta = metadata.topics.find((t) => t.name === topicName);
+    if (!topicMeta) throw new Error(`Topic ${topicName} not found.`);
+
+    const partitionAssignment = topicMeta.partitions.map((p) => {
+      const currentReplicas = p.replicas;
+      let newReplicas: number[];
+
+      if (newReplicationFactor === currentReplicas.length) {
+        newReplicas = currentReplicas;
+      } else if (newReplicationFactor > currentReplicas.length) {
+        const candidates = allBrokerIds.filter((id) => !currentReplicas.includes(id));
+        const toAdd = candidates
+          .slice()
+          .sort((a, b) => ((a + p.partitionId) % allBrokerIds.length) - ((b + p.partitionId) % allBrokerIds.length))
+          .slice(0, newReplicationFactor - currentReplicas.length);
+        newReplicas = [...currentReplicas, ...toAdd];
+      } else {
+        const leader = p.leader;
+        const followers = currentReplicas.filter((id) => id !== leader);
+        newReplicas = [leader, ...followers.slice(0, newReplicationFactor - 1)];
+      }
+
+      return { partition: p.partitionId, replicas: newReplicas };
+    });
+
+    await admin.alterPartitionReassignments({
+      topics: [{ topic: topicName, partitionAssignment }],
+    });
+
+    return { partitionsReassigned: partitionAssignment.length };
+  });
+}
+
 export async function updateTopicRetention(
   topicName: string,
   retentionMs: number

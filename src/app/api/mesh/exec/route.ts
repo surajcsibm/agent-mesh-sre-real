@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/lib/runtime-mode";
 import { kafkaProduceAudit } from "@/lib/kafka";
-import { updateTopicRetention, increaseTopicPartitions } from "@/lib/kafka-admin-cfk";
+import { updateTopicRetention, increaseTopicPartitions, changeTopicReplicationFactor } from "@/lib/kafka-admin-cfk";
 import { getK8s } from "@/lib/k8s/holder";
 import { safeErr } from "@/lib/log-safe";
 import type { AuditRecord } from "@/lib/types";
@@ -78,6 +78,14 @@ export async function POST(req: Request) {
       // from plain HTTPS. Share-Group Rebalance now uses honest narrative
       // text instead (see runShareGroupRebalance in client-sim.ts) rather
       // than a real remote action for this scenario's "Act" step.
+      case "change-topic-replication-factor": {
+        const newRF = (body as { newReplicationFactor?: number }).newReplicationFactor;
+        if (!body.topicName || newRF === undefined) {
+          return NextResponse.json({ error: "topicName and newReplicationFactor required" }, { status: 400 });
+        }
+        const rfResult = await changeTopicReplicationFactor(body.topicName, newRF);
+        return NextResponse.json({ ok: true, action: body.action, topicName: body.topicName, newReplicationFactor: newRF, ...rfResult });
+      }
       case "increase-topic-partitions": {
         const newCount = (body as { newPartitionCount?: number }).newPartitionCount;
         if (!body.topicName || newCount === undefined) {
