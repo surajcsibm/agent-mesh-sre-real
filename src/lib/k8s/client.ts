@@ -13,6 +13,7 @@
 import "server-only";
 import * as k8s from "@kubernetes/client-node";
 import { parseAllDocuments } from "yaml";
+import { Writable } from "stream";
 
 export type ApplyResult = {
   group: string;
@@ -362,16 +363,19 @@ export class K8sClient {
     command: string[],
     timeoutMs = 15_000
   ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-    const stream = await import("stream");
-    const k8sExec = await import("@kubernetes/client-node");
-    const exec = new k8sExec.Exec(this.kc);
+    // Use the already-imported k8s namespace and a static Writable import —
+    // dynamic import("stream")/import("@kubernetes/client-node") inside this
+    // method bundled differently on Vercel than local dev, producing
+    // "Writable is not a constructor" at runtime despite passing TypeScript
+    // type-checking (types were fine; the bundled runtime shape wasn't).
+    const exec = new k8s.Exec(this.kc);
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
-    const stdout = new stream.Writable({
+    const stdout = new Writable({
       write(chunk, _enc, cb) { stdoutChunks.push(Buffer.from(chunk)); cb(); },
     });
-    const stderr = new stream.Writable({
+    const stderr = new Writable({
       write(chunk, _enc, cb) { stderrChunks.push(Buffer.from(chunk)); cb(); },
     });
 
