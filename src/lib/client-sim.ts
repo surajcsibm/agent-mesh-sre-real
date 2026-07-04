@@ -575,15 +575,25 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
 
   // t≈6s — pause for human approval before checkpoint
   allTimers.push(setTimeout(() => {
+    // Reframed to be honest: kafka.checkpointShareGroup was an invented tool
+    // call with no real Kafka Admin API or CLI equivalent — confirmed this
+    // session that KIP-932 share-group delivery/offset state is managed
+    // automatically by the broker's share-group coordinator; there is no
+    // client-triggerable "checkpoint" mutation to perform. This scenario now
+    // frames the gated action as acknowledging a real, verified Kafka
+    // feature (confirmed active on this cluster via kafka-share-groups
+    // --list/--describe) rather than a fabricated mutating call. The
+    // approval gate itself is kept for demo-flow consistency with the other
+    // three gated scenarios.
     const toolCall: MCPToolCall = {
       jsonrpc: "2.0", id: uid(), method: "tools/call",
-      params: { name: "kafka.checkpointShareGroup", arguments: { shareGroupId: "payments-share-group", reason: "KIP-932 rebalance: 600 msgs behind" } },
+      params: { name: "kafka.acknowledgeShareGroupRebalance", arguments: { shareGroupId: "payments-share-group", reason: "KIP-932 rebalance: 600 msgs behind" } },
     };
     const approval: ApprovalRequest = {
       id: uid(), ts: Date.now(), createdAt: Date.now(),
       agent: "monitor", proposedBy: "monitor-agent",
       toolCall, scenarioId: "share-group-rebalance",
-      reason: "Checkpoint payments-share-group offsets to prevent duplicate delivery during KIP-932 rebalance",
+      reason: "Acknowledge payments-share-group rebalance — broker manages delivery/offset state automatically under KIP-932, no client-side mutation required",
       status: "pending",
     };
     agents = patch(agents, "monitor", {
@@ -595,15 +605,15 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
         rebalanceState: "Rebalancing",
         controllerEpoch: 14,
         crossCorrelation: { brokers: "healthy", jvmHeap: "62%", networkInRate: "↑ 1.4×", rebalanceInProgress: true },
-        recommendedAction: "kafka.checkpointShareGroup(shareGroupId=payments-share-group)",
+        recommendedAction: "kafka.acknowledgeShareGroupRebalance(shareGroupId=payments-share-group)",
         requiresApproval: true,
-        rationale: "Share group rebalance triggered — consumer missed heartbeat deadline causing group coordinator timeout. Queue depth exceeded configured fetch limit. Checkpointing offsets before reassignment prevents duplicate delivery. Broker partition leadership shift may have invalidated existing assignments.",
+        rationale: "Share group rebalance triggered — consumer missed heartbeat deadline causing group coordinator timeout. Queue depth exceeded configured fetch limit. Under KIP-932, the broker's share-group coordinator manages delivery and offset state automatically — no client-side checkpoint mutation exists or is required. Acknowledging the event, rather than mutating state, is the correct operator action here.",
         lessonsCited: [],
       },
     });
     console.log("[client-sim] dispatching share-group approval gate", approval);
     dispatch({ type: "state", payload: { agents, mralPhase: "awaiting", broker: mockBroker(600), incidentQueueDepth: 1 } });
-    dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.checkpointShareGroup (policy-gated, human-in-the-loop)", "approval") });
+    dispatch({ type: "audit", record: auditRec("monitor", "Awaiting approval: kafka.acknowledgeShareGroupRebalance (policy-gated, human-in-the-loop) — broker-managed KIP-932 state, no mutation to perform", "approval") });
     // Add to history immediately as "awaiting approval"
     dispatch({ type: "emailSummary", data: {
       scenarioLabel: (approval.scenarioId ?? "unknown").replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
@@ -613,14 +623,14 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
       approved: false, sent: false,
       status: "awaiting-approval",
       completedAt: Date.now(),
-      reasoning: { rootCause: "KIP-932 share group queue depth 18,000 — offset checkpoint required to prevent duplicate redelivery on consumer restart", kafkaFeatureCited: "KIP-932 Share Groups", confidence: 0.91, rationale: "Share group delivery state has diverged from committed offsets. Checkpointing now prevents mass redelivery if any consumer restarts. Policy gate required because checkpoint mutates durable broker state." },
+      reasoning: { rootCause: "KIP-932 share group queue depth 18,000 — rebalance in progress on payments-share-group", kafkaFeatureCited: "KIP-932 Share Groups", confidence: 0.91, rationale: "Share group rebalance detected. Under KIP-932, the broker's share-group coordinator manages delivery/offset state automatically — there is no client-side checkpoint mutation to perform. The policy gate reflects acknowledging a real cluster event, not a state mutation." },
     } });
     // Remove stale approval for same scenario
     const _staleIdx = _globalPendingApprovals.findIndex(a => a.scenarioId === approval.scenarioId);
     if (_staleIdx >= 0) _globalPendingApprovals.splice(_staleIdx, 1);
     _globalPendingApprovals.push(approval);
     dispatch({ type: "add_pending_approval", payload: _globalPendingApprovals[_globalPendingApprovals.length - 1] });
-    toast(dispatch, "⏳ Approval required: kafka.checkpointShareGroup — check the approval panel", "warning");
+    toast(dispatch, "⏳ Approval required: kafka.acknowledgeShareGroupRebalance — check the approval panel", "warning");
 
     _pendingApprovalCallbacks.set(approval.id, (approved: boolean) => {
       // Remove from pending display when resolved
@@ -632,7 +642,7 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "acting", mralPhase: "act" });
           dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(600), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 1 } });
-          dispatch({ type: "audit", record: auditRec("monitor", "Approved by operator · executing kafka.checkpointShareGroup(shareGroupId=payments-share-group)", "approval") });
+          dispatch({ type: "audit", record: auditRec("monitor", "Approved by operator · acknowledging payments-share-group rebalance (kafka.acknowledgeShareGroupRebalance) — broker manages delivery state automatically under KIP-932, no mutation performed", "approval") });
           particle(dispatch, "e-inc", "monitor", "writer");
         }, 300));
 
@@ -648,25 +658,25 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
           agents = patch(agents, "writer",       { status: "online" });
           agents = patch(agents, "notification", { status: "acting" });
           dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(0), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
-          dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Share-group rebalance", message: "✅ payments-share-group rebalance complete — offsets checkpointed", scenarioId: "share-group-rebalance" } });
+          dispatch({ type: "notification", record: { id: uid(), ts: Date.now(), channel: "slack", title: "Share-group rebalance", message: "✅ payments-share-group rebalance acknowledged — broker-managed delivery state confirmed stable (KIP-932)", scenarioId: "share-group-rebalance" } });
           dispatch({ type: "audit", record: auditRec("notification", "Slack #sre-alerts posted · ITSM ticket opened · email summary dispatched", "notification") });
-          sendEmail(dispatch, "share-group", "Share Group Rebalance", 600, 0, "kafka.checkpointShareGroup", {
+          sendEmail(dispatch, "share-group", "Share Group Rebalance", 600, 0, "kafka.acknowledgeShareGroupRebalance", {
             approvedBy: "operator",
             reasoning: {
               rootCause: "KIP-932 share group rebalance detected on payments-share-group (600 msgs behind)",
               confidence: 0.91, kafkaFeatureCited: "KIP-932 Share Groups",
-              rationale: "Consumer heartbeat deadline missed, triggering group coordinator timeout. Share group queue depth exceeded fetch limit. Offset checkpoint applied — duplicate delivery prevented during member join/leave transition.",
+              rationale: "Consumer heartbeat deadline missed, triggering group coordinator timeout. Under KIP-932, delivery/offset state is managed automatically by the broker's share-group coordinator — no client-side mutation exists or was needed. Rebalance completed and state confirmed stable.",
             },
-            lesson: { notes: "Share group checkpoint prevented duplicate message delivery during rebalance." },
-            slackMessage: "✅ Share group rebalance resolved · offsets checkpointed · lag 600→0",
-            itsmTicket: `INC-${Date.now().toString().slice(-5)} closed — kafka.checkpointShareGroup resolved share group lag`,
+            lesson: { notes: "KIP-932 share groups self-manage delivery state through rebalances — no client-side action required, only acknowledgment." },
+            slackMessage: "✅ Share group rebalance acknowledged · broker-managed state confirmed stable · lag 600→0",
+            itsmTicket: `INC-${Date.now().toString().slice(-5)} closed — payments-share-group rebalance self-resolved (KIP-932)`,
           });
         }, 6000));
 
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "notification", { status: "online" });
           dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0, scenarioRunning: false } });
-          toast(dispatch, "✅ Share-group rebalance approved and handled", "success");
+          toast(dispatch, "✅ Share-group rebalance acknowledged — broker-managed state confirmed stable", "success");
         }, 9000));
 
       } else {
@@ -674,14 +684,14 @@ function runShareGroupRebalance(dispatch: DispatchFn): () => void {
         allTimers.push(setTimeout(() => {
           agents = patch(agents, "monitor", { status: "online", mralPhase: "idle" });
           dispatch({ type: "state", payload: { agents, mralPhase: "idle", broker: mockBroker(0), incidentQueueDepth: 0, scenarioRunning: false } });
-          dispatch({ type: "audit", record: auditRec("monitor", "Action REJECTED by operator — kafka.checkpointShareGroup not executed, scenario aborted", "approval") });
-          toast(dispatch, "🚫 Rejected — kafka.checkpointShareGroup not executed", "error");
-          sendEmail(dispatch, "share-group", "Share Group Rebalance", 18000, 18000, "Rejected — no checkpoint applied", {
+          dispatch({ type: "audit", record: auditRec("monitor", "Action REJECTED by operator — kafka.acknowledgeShareGroupRebalance not executed, scenario aborted (broker continues managing delivery state automatically under KIP-932 regardless of this acknowledgment)", "approval") });
+          toast(dispatch, "🚫 Rejected — acknowledgment not sent (broker-managed state unaffected)", "error");
+          sendEmail(dispatch, "share-group", "Share Group Rebalance", 18000, 18000, "Rejected — acknowledgment not sent", {
             approved: false, approvedBy: "operator",
             reasoning: {
-              rootCause: "KIP-932 share group queue depth 18,000 — offset checkpoint required to prevent duplicate redelivery on consumer restart",
+              rootCause: "KIP-932 share group queue depth 18,000 — rebalance in progress on payments-share-group",
               confidence: 0.91, kafkaFeatureCited: "KIP-932 Share Groups",
-              rationale: "Share group delivery state has diverged from committed offsets. Operator rejected checkpoint action — delivery state remains uncommitted.",
+              rationale: "Share group rebalance detected. Operator rejected the acknowledgment — broker-managed delivery state continues unaffected either way, since KIP-932 does not expose a client-side mutation for this.",
             },
           });
         }, 300));
