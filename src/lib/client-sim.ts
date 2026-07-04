@@ -379,7 +379,16 @@ function runLagSpike(dispatch: DispatchFn): () => void {
           evt("approval", "monitor", "Approved by operator — executing kafka.scaleConsumers");
           toast(dispatch, "✅ Approved — scaling consumers", "info");
           particle(dispatch, "e-inc", "monitor", "writer");
+          // Real cluster action — scoped to demo-consumer, the only live consumer
+          // group on this cluster. Simulated group names above are display-only.
+          fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+            body: JSON.stringify({ action: "scale-consumer-group", replicas: 4 }) }).catch(() => {});
         }, 0));
+        allTimers.push(setTimeout(() => {
+          // Reset to baseline so the cluster is clean for the next demo run.
+          fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+            body: JSON.stringify({ action: "scale-consumer-group", replicas: 2 }) }).catch(() => {});
+        }, 20000));
 
         allTimers.push(setTimeout(() => {
           dispatch({ type: "audit", record: auditRec("monitor", "kafka.scaleConsumers succeeded · lag draining at 680 msg/s · ConsumerGroupScaleOut mutation applied", "tool-call") });
@@ -1613,6 +1622,15 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
           });
           dispatch({ type: "state", payload: { agents, mralPhase: "act", broker: mockBroker(lagTotal), incidentQueueDepth: 1 } });
           dispatch({ type: "audit", record: auditRec("monitor", `✅ Approved. Executing: restart dead replica + scale +2 consumers on ${topicName}`, "tool-call") });
+          // Real cluster action — restart + scale, scoped to demo-consumer.
+          fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+            body: JSON.stringify({ action: "restart-consumer-group" }) }).catch(() => {});
+          fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+            body: JSON.stringify({ action: "scale-consumer-group", replicas: 4 }) }).catch(() => {});
+          delay(20000, () => {
+            fetch("/api/mesh/exec", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+              body: JSON.stringify({ action: "scale-consumer-group", replicas: 2 }) }).catch(() => {});
+          });
           particle(dispatch, "e-inc", "monitor", "writer");
         });
 
