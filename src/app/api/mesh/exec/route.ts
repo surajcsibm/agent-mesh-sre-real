@@ -3,6 +3,7 @@ import { getRuntime } from "@/lib/runtime-mode";
 import { kafkaProduceAudit } from "@/lib/kafka";
 import { updateTopicRetention, increaseTopicPartitions } from "@/lib/kafka-admin-cfk";
 import { getK8s } from "@/lib/k8s/holder";
+import type { K8sClient } from "@/lib/k8s/client";
 import { safeErr } from "@/lib/log-safe";
 import type { AuditRecord } from "@/lib/types";
 
@@ -64,6 +65,35 @@ export async function POST(req: Request) {
         }
         await updateTopicRetention(body.topicName, body.retentionMs);
         return NextResponse.json({ ok: true, action: body.action, topicName: body.topicName });
+      }
+      case "describe-share-group": {
+        // Real check against Kafka's actual share-group state via kafka-0.
+        // KafkaJS has zero share-group Admin API methods (confirmed by
+        // checking its type definitions) — kafka-share-groups is the only
+        // real interface, and it only runs inside a broker pod, hence the
+        // exec call rather than a REST-style Admin API call like everything
+        // else in this file. NOTE: unlike `kubectl exec` (which auto-selects
+        // a default container), the exec API requires the container name
+        // explicitly — this cluster's broker pods run it as "kafka".
+        const k8s: K8sClient = await getK8s();
+        const groupName = (body as { groupName?: string }).groupName ?? "demo-share-group";
+        const result = await k8s.execInPod(
+          "confluent",
+          "kafka-0",
+          "kafka",
+          [
+            "kafka-share-groups",
+            "--bootstrap-server", "kafka.confluent.svc.cluster.local:9071",
+            "--describe",
+            "--group", groupName,
+            "--state",
+          ],
+          15_000
+        );
+        if (result.exitCode !== 0 && result.exitCode !== null) {
+          return NextResponse.json({ error: result.stderr || "kafka-share-groups exited non-zero", exitCode: result.exitCode }, { status: 500 });
+        }
+        return NextResponse.json({ ok: true, action: body.action, groupName, output: result.stdout.trim() });
       }
       case "increase-topic-partitions": {
         const newCount = (body as { newPartitionCount?: number }).newPartitionCount;

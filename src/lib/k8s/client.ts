@@ -347,6 +347,68 @@ export class K8sClient {
     }
   }
 
+  /**
+   * Exec a command inside a running pod and capture stdout/stderr as strings.
+   * Uses the Kubernetes exec API (WebSocket-based, unlike every other REST-
+   * style call in this file) — wrapped with a hard timeout since a hung
+   * WebSocket connection left open in a Vercel serverless function is a new
+   * failure class we haven't hit before and want to guard against explicitly,
+   * not discover live.
+   */
+  async execInPod(
+    namespace: string,
+    podName: string,
+    containerName: string,
+    command: string[],
+    timeoutMs = 15_000
+  ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+    const stream = await import("stream");
+    const k8sExec = await import("@kubernetes/client-node");
+    const exec = new k8sExec.Exec(this.kc);
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    const stdout = new stream.Writable({
+      write(chunk, _enc, cb) { stdoutChunks.push(Buffer.from(chunk)); cb(); },
+    });
+    const stderr = new stream.Writable({
+      write(chunk, _enc, cb) { stderrChunks.push(Buffer.from(chunk)); cb(); },
+    });
+
+    let settled = false;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`execInPod timed out after ${timeoutMs}ms (pod=${podName})`));
+      }, timeoutMs);
+
+      exec.exec(
+        namespace, podName, containerName, command,
+        stdout, stderr, null, false,
+        (status) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          const exitCode = status?.status === "Success" ? 0
+            : (status?.details?.causes?.find((c) => c.reason === "ExitCode")?.message
+                ? Number(status.details.causes.find((c) => c.reason === "ExitCode")!.message)
+                : null);
+          resolve({
+            stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+            stderr: Buffer.concat(stderrChunks).toString("utf-8"),
+            exitCode,
+          });
+        }
+      ).catch((e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(e);
+      });
+    });
+  }
+
   async getNamespace(name: string) {
     try {
       return await this.core.readNamespace(name);
