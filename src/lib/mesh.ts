@@ -53,7 +53,7 @@ function makeInitialAgents(): Record<ServerAgentId, AgentState> {
     },
     notification: {
       id: "notification", name: "Notification Agent",
-      role: "Routes audit events to Slack, opens ITSM tickets, and emails a full agent summary to surajcs@gmail.com.",
+      role: "Routes audit events to Slack, opens ITSM tickets, and emails a full agent summary to the configured notification recipient.",
       status: "online", mralPhase: "idle", color: "#f97316",
       lastReasoning: null, lastAction: null, lastLesson: null,
       consumerOffset: { "ops.actions.audit.v1": 0 },
@@ -310,8 +310,13 @@ async function runNotification(
   audit("notification", "notification", `Opened ITSM ticket ${ticketId}`, { ticketId, severity: "P3" });
   particle("e-aud", "notification", "notification");
 
-  // ── Email summary to surajcs@gmail.com ──────────────────────────────────
-  toast("Notification Agent: sending email summary to surajcs@gmail.com…", "info");
+  // ── Email summary to the configured notification recipient ──────────────
+  const notifyEmail = process.env.NOTIFICATION_EMAIL;
+  if (!notifyEmail) {
+    toast("Notification Agent: NOTIFICATION_EMAIL is not configured — skipping email summary", "error");
+  } else {
+    toast(`Notification Agent: sending email summary to ${notifyEmail}…`, "info");
+  }
   const emailResult = await sendAgentSummary({
     scenarioId,
     scenarioLabel: scenarioId,
@@ -325,9 +330,9 @@ async function runNotification(
   });
 
   if (emailResult.ok) {
-    audit("notification", "notification", `Email summary sent to surajcs@gmail.com (messageId: ${emailResult.messageId})`, { to: "surajcs@gmail.com", scenarioId });
-    toast("✉ Email summary sent to surajcs@gmail.com", "success");
-    const notifEmail: NotificationRecord = { id: uid(), ts: Date.now(), channel: "email" as "slack", message: `Email summary sent to surajcs@gmail.com — ${scenarioId}`, scenarioId };
+    audit("notification", "notification", `Email summary sent to ${notifyEmail} (messageId: ${emailResult.messageId})`, { to: notifyEmail, scenarioId });
+    toast(`✉ Email summary sent to ${notifyEmail}`, "success");
+    const notifEmail: NotificationRecord = { id: uid(), ts: Date.now(), channel: "email" as "slack", message: `Email summary sent to ${notifyEmail} — ${scenarioId}`, scenarioId };
     s.notifications.push(notifEmail);
     eventBus.publish({ type: "notification", record: notifEmail });
   } else if (emailResult.error === "smtp_not_configured") {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getRuntime } from "@/lib/runtime-mode";
 import { safeErr } from "@/lib/log-safe";
 import {
@@ -50,14 +51,44 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, mode: "MOCK", note: "No-op in MOCK mode" });
   }
 
-  const body = await req.json() as {
-    action: "create" | "delete" | "describe" | "ensure-all";
-    name?: string;
-    partitions?: number;
-    replication?: number;
-    retentionMs?: number;
-    cleanupPolicy?: "delete" | "compact";
-  };
+  let rawBody: unknown;
+  try {
+    rawBody = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+  }
+
+  // Kafka topic names are restricted to this character set in practice, and
+  // names starting with "_" are internal/reserved (e.g. __consumer_offsets,
+  // __transaction_state) — the same convention listTopics() already filters
+  // on elsewhere in kafka-admin-cfk.ts. Blocking it here too means a caller
+  // can never target an internal topic via this route, even by accident.
+  const AdminTopicsRequest = z.object({
+    action: z.enum(["create", "delete", "describe", "ensure-all"]),
+    name: z.string()
+      .min(1)
+      .max(249)
+      .regex(/^[a-zA-Z0-9._-]+$/, "Topic name may only contain letters, numbers, '.', '_', and '-'")
+      .refine((n) => !n.startsWith("_"), "Cannot target internal/reserved Kafka topics (names starting with _)")
+      .optional(),
+    partitions: z.number().int().min(1).max(1000).optional(),
+    replication: z.number().int().min(1).max(32).optional(),
+    retentionMs: z.number().int().min(-1).optional(),
+    cleanupPolicy: z.enum(["delete", "compact"]).optional(),
+  }).superRefine((data, ctx) => {
+    if ((data.action === "create" || data.action === "delete" || data.action === "describe") && !data.name) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["name"], message: "name is required for this action" });
+    }
+  });
+
+  const parsed = AdminTopicsRequest.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid payload", details: parsed.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+  const body = parsed.data;
 
   try {
     switch (body.action) {

@@ -225,7 +225,10 @@ export async function sendAgentSummary(payload: AgentSummaryPayload): Promise<Em
       },
     });
 
-    const to   = process.env.NOTIFICATION_EMAIL ?? "surajcs@gmail.com";
+    const to = process.env.NOTIFICATION_EMAIL;
+    if (!to) {
+      return { ok: false, error: "NOTIFICATION_EMAIL is not configured — refusing to send to an unconfigured recipient" };
+    }
     const info = await transporter.sendMail({
       from:    `"Agent Mesh SRE" <${process.env.SMTP_USER}>`,
       to,
