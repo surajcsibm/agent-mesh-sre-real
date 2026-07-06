@@ -93,7 +93,18 @@ class MockConsumer implements MeshConsumer {
 // ── REAL KafkaJS implementation ───────────────────────────────────────────────
 
 function buildKafkaJSConfig(clientId: string) {
-  const sslEnabled = process.env.KAFKA_SSL_ENABLED?.toLowerCase() !== "false";
+  // KAFKA_SSL_ENABLED must be explicit in real mode. The old default
+  // (absent => TLS on) silently aimed a TLS handshake at the plaintext
+  // listener whenever the env var went missing or got mangled in Vercel.
+  // Fail loud at startup instead of failing weird at the broker.
+  const sslRaw = process.env.KAFKA_SSL_ENABLED?.trim().toLowerCase();
+  if (process.env.KAFKA_MODE?.trim().toLowerCase() === "real" && sslRaw !== "true" && sslRaw !== "false") {
+    throw new Error(
+      '[Kafka REAL] KAFKA_SSL_ENABLED must be exactly "true" or "false" - got ' +
+        JSON.stringify(process.env.KAFKA_SSL_ENABLED)
+    );
+  }
+  const sslEnabled = sslRaw === "true";
 
   const sslConfig = !sslEnabled
     ? false
