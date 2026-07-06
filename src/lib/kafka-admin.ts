@@ -31,9 +31,15 @@ const TOPICS_TO_PROBE = [
   "ops.requests.v1",
 ];
 
+// "share-group-1" was removed from this list — it never existed as a real
+// classic consumer group, and describeGroups() on a name with zero members
+// correctly (but misleadingly) reports state: "Dead", causing
+// evalConsumerSessionTimeout() to log a false "group died" detection on
+// every eligible poll cycle. Real Share-Group monitoring now goes through
+// the dedicated share-group-poller + background subscriber in
+// monitor-poll.ts instead, which speaks the correct KIP-932 protocol.
 const GROUPS_TO_PROBE = [
   "payments-consumer",
-  "share-group-1",
 ];
 
 async function collectReal(): Promise<KafkaAdminMetrics> {
