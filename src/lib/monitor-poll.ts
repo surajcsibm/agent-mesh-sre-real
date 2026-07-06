@@ -89,6 +89,38 @@ declare global {
   } | undefined;
 }
 
+// Real Share-Group queue-depth, populated by a small in-cluster poller
+// (share-group-poller Deployment) publishing to ops.kafka.metrics.v1, since
+// classic KafkaJS consumer-group APIs (describeGroups/fetchOffsets) do not
+// apply to KIP-932 share groups at all — confirmed this session; they use a
+// completely different broker coordinator. This is a long-lived background
+// subscriber (unlike every other real-mode call in this codebase, which uses
+// a fresh client per call) because KafkaJS consumers are push/subscription-
+// based — there is no clean "fetch the one latest message" primitive to call
+// synchronously each poll cycle, so a cached value updated by an ongoing
+// subscription is the natural fit here instead.
+let latestShareGroupStatus: { totalLag: number; ts: number } | null = null;
+let shareGroupSubscriberStarted = false;
+
+async function startShareGroupStatusSubscriber(): Promise<void> {
+  if (shareGroupSubscriberStarted) return;
+  shareGroupSubscriberStarted = true;
+  try {
+    const { getMeshConsumer } = await import("./kafka");
+    const consumer = await getMeshConsumer("agent-mesh-sre-monitor-sharegroup");
+    await consumer.subscribe(["ops.kafka.metrics.v1"], (msg) => {
+      const v = msg.value as { type?: string; group?: string; totalLag?: number; ts?: number } | null;
+      if (v?.type === "share-group-status" && typeof v.totalLag === "number") {
+        latestShareGroupStatus = { totalLag: v.totalLag, ts: v.ts ?? Date.now() };
+      }
+    });
+    console.log("[MonitorPoll] Share-group status subscriber connected");
+  } catch (e) {
+    shareGroupSubscriberStarted = false;
+    console.warn("[MonitorPoll] Share-group status subscriber failed to start:", (e as Error).message);
+  }
+}
+
 function getPollGlobal() {
   if (!globalThis.__monitorPoll) {
     globalThis.__monitorPoll = {
@@ -124,6 +156,19 @@ async function collectSnapshot(): Promise<MetricSnapshot> {
     topicSizeBytes: {},
     schemaVersionCounts: {},
   };
+
+  // Real Share-Group data — merged in real mode only, from the cached value
+  // kept updated by the background subscriber above. Only overwrites the mock
+  // baseline if we have a genuinely fresh reading (within 2 poll cycles' worth
+  // of time), so a dead/disconnected poller falls back to mock state instead
+  // of freezing on a stale number forever.
+  if (getRuntime().mode === "real" && latestShareGroupStatus && Date.now() - latestShareGroupStatus.ts < POLL_MS * 2) {
+    snap.consumerGroups["demo-share-group"] = {
+      lag: latestShareGroupStatus.totalLag,
+      memberCount: 1,
+      state: "stable",
+    };
+  }
 
   // ── ALWAYS read the in-memory broker simulation as baseline ──────────────
   // Ensures controllerEpoch and consumerGroups reflect scenario trigger state
@@ -281,11 +326,11 @@ function evalShareGroup(
     cause: "",
     gate: "approval",
   };
-  const sg = snap.consumerGroups["share-group-1"];
+  const sg = snap.consumerGroups["demo-share-group"];
   if (!sg || sg.lag < 5_000) return base;
 
   const prev = history.length
-    ? history[history.length - 1].consumerGroups["share-group-1"]
+    ? history[history.length - 1].consumerGroups["demo-share-group"]
     : null;
   const growing = !prev || sg.lag >= prev.lag;
   if (sg.lag > 10_000 && growing) {
@@ -617,6 +662,7 @@ const READY_FOR_REAL_TRIGGER = new Set<PollScenarioId>([
   "lag-spike",
   "controller-failover",
   "benign-rebalance",
+  "share-group",
 ]);
 
 
@@ -793,6 +839,10 @@ export function startMonitorPolling(): void {
   const g = getPollGlobal();
   if (g!.state.running) return;
   g!.state.running = true;
+
+  startShareGroupStatusSubscriber().catch((e) =>
+    console.warn("[MonitorPoll] Share-group subscriber start error:", (e as Error).message)
+  );
 
   // Fire one cycle immediately, then repeat
   runPollCycle().catch((e) =>
