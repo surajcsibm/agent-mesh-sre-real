@@ -327,18 +327,23 @@ function evalShareGroup(
     gate: "approval",
   };
   const sg = snap.consumerGroups["demo-share-group"];
-  if (!sg || sg.lag < 5_000) return base;
+  // TEMP-DEMO-THRESHOLD: lowered from 5_000/10_000 to 3/5 for live testing
+  // tonight against real (but low-volume) cluster traffic. REVERT before
+  // July 22 — restore the original thresholds below once testing is done.
+  // ORIGINAL: if (!sg || sg.lag < 5_000) return base;
+  if (!sg || sg.lag < 3) return base;
 
   const prev = history.length
     ? history[history.length - 1].consumerGroups["demo-share-group"]
     : null;
   const growing = !prev || sg.lag >= prev.lag;
-  if (sg.lag > 10_000 && growing) {
+  // ORIGINAL: if (sg.lag > 10_000 && growing) {
+  if (sg.lag > 5 && growing) {
     return {
       ...base,
       triggered: true,
       confidence: 0.84,
-      cause: `share-group-1 queue depth ${sg.lag.toLocaleString()} records, growing`,
+      cause: `demo-share-group queue depth ${sg.lag.toLocaleString()} records, growing`,
     };
   }
   return base;
