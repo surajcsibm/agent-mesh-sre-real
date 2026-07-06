@@ -223,7 +223,7 @@ export type BusEvent =
   | { type: "lesson"; record: LessonRecord }
   | { type: "approval-new"; payload: ApprovalRequest }
   | { type: "approval-update"; payload: ApprovalRequest }
-| { type: "auto-trigger-scenario"; scenarioId: string }
+| { type: "auto-trigger-scenario"; scenarioId: string; real?: { confidence: number; cause: string } }
 | { type: "auto-topic-heal"; topicName: string; currentStatus: "degraded" | "critical"; lagTotal: number; partitions: number };
 
 // ── Wire-protocol types (kind-discriminated, used by store + sse-client) ──────

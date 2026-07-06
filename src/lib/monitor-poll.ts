@@ -766,7 +766,7 @@ export async function runPollCycle(): Promise<void> {
       });
 
       if (READY_FOR_REAL_TRIGGER.has(scenarioId)) {
-        eventBus.publish({ type: "auto-trigger-scenario", scenarioId } as never);
+        eventBus.publish({ type: "auto-trigger-scenario", scenarioId, real: { confidence, cause } } as never);
         try {
           const { deferNextAnomalyCycle } = await import("./anomaly-sim");
           deferNextAnomalyCycle();

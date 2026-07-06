@@ -136,8 +136,12 @@ export function useMeshStream(simPaused: boolean) {
           case "auto-trigger-scenario": {
             // Autonomous Monitor triggered a scenario — run the full client-side MRAL.
             // runClientScenario handles: animation, approval gates, notifications, email.
-            const sid = (event as { type: "auto-trigger-scenario"; scenarioId: string }).scenarioId;
-            if (sid && !simPausedRef.current) runClientScenario(sid as ScenarioKey, dispatch as (a: SimAction) => void);
+            // "real" carries genuine confidence/cause from monitor-poll.ts's evaluators
+            // for the 3 scenarios wired to real detection; undefined when anomaly-sim's
+            // fake schedule fired instead — each scenario function falls back to its
+            // existing hardcoded demo text in that case.
+            const ev = event as { type: "auto-trigger-scenario"; scenarioId: string; real?: { confidence: number; cause: string } };
+            if (ev.scenarioId && !simPausedRef.current) runClientScenario(ev.scenarioId as ScenarioKey, dispatch as (a: SimAction) => void, ev.real);
             break;
           }
           case "auto-topic-heal": {

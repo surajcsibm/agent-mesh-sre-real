@@ -274,8 +274,15 @@ function schedule(steps: Step[]): () => void {
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────
 
-function runLagSpike(dispatch: DispatchFn): () => void {
+function runLagSpike(dispatch: DispatchFn, real?: { confidence: number; cause: string }): () => void {
   let agents = baseAgents();
+  // Real confidence/cause from monitor-poll.ts's evalLagSpike() when fired by
+  // genuine detection; falls back to the existing demo numbers when fired by
+  // anomaly-sim's fake schedule. Used consistently across the approval-gate
+  // reasoning, the awaiting-approval summary, and both the approved- and
+  // rejected-path email summaries below.
+  const lsConfidence = real?.confidence ?? 0.94;
+  const lsRootCause = real?.cause ?? "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions";
   const allTimers: ReturnType<typeof setTimeout>[] = [];
   // Collect key feed events for the summary popup + email
   const liveEvents: LiveFeedEvent[] = [];
@@ -331,8 +338,8 @@ function runLagSpike(dispatch: DispatchFn): () => void {
     };
     agents = patch(agents, "monitor", { status: "awaiting-approval", mralPhase: "awaiting",
       lastReasoning: {
-        rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
-        confidence: 0.94,
+        rootCause: lsRootCause,
+        confidence: lsConfidence,
         kafkaFeatureCited: "KIP-848 Share Groups",
         rebalanceState: "Rebalancing",
         controllerEpoch: 14,
@@ -354,7 +361,7 @@ function runLagSpike(dispatch: DispatchFn): () => void {
       approved: false, sent: false,
       status: "awaiting-approval",
       completedAt: Date.now(),
-      reasoning: { rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions", kafkaFeatureCited: "KIP-848 Share Groups", confidence: 0.94, rationale: "Lag growth rate 420 msg/s exceeds SLO (150 msg/s). Root cause: downstream DB bottleneck stalling consumer threads during active KIP-848 rebalance. Adding 2 consumers will absorb the spike within ~10s." },
+      reasoning: { rootCause: lsRootCause, kafkaFeatureCited: "KIP-848 Share Groups", confidence: lsConfidence, rationale: "Lag growth rate 420 msg/s exceeds SLO (150 msg/s). Root cause: downstream DB bottleneck stalling consumer threads during active KIP-848 rebalance. Adding 2 consumers will absorb the spike within ~10s." },
     } });
     // Remove stale approval for same scenario
     const _staleIdx = _globalPendingApprovals.findIndex(a => a.scenarioId === approval.scenarioId);
@@ -422,8 +429,8 @@ function runLagSpike(dispatch: DispatchFn): () => void {
             approvedBy: "operator",
             approved: true,
             reasoning: {
-              rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
-              confidence: 0.94, kafkaFeatureCited: "KIP-848 Share Groups",
+              rootCause: lsRootCause,
+              confidence: lsConfidence, kafkaFeatureCited: "KIP-848 Share Groups",
               rationale: "Lag growth 420 msg/s exceeded SLO. Downstream DB bottleneck stalled consumer threads; insufficient partition count created hotspots. Added 2 consumers — lag drained in ~10s.",
               lessonsCited: ["lesson-003"],
             },
@@ -461,8 +468,8 @@ function runLagSpike(dispatch: DispatchFn): () => void {
           approvedBy: "operator",
           approved: false,
           reasoning: {
-            rootCause: "Consumer group processing rate fallen below producer write rate — 4,200 messages behind across 3 partitions",
-            confidence: 0.94, kafkaFeatureCited: "KIP-848 Share Groups",
+            rootCause: lsRootCause,
+            confidence: lsConfidence, kafkaFeatureCited: "KIP-848 Share Groups",
             rationale: "Lag growth 420 msg/s exceeded SLO (150 msg/s). Cause: broker rebalance mid-consumption paused processing. Operator rejected scale action — no cluster changes made.",
             lessonsCited: ["lesson-003"],
           },
@@ -475,8 +482,14 @@ function runLagSpike(dispatch: DispatchFn): () => void {
   return () => allTimers.forEach(clearTimeout);
 }
 
-function runControllerFailover(dispatch: DispatchFn): () => void {
+function runControllerFailover(dispatch: DispatchFn, real?: { confidence: number; cause: string }): () => void {
   let agents = baseAgents();
+  // Real confidence/cause from monitor-poll.ts's evalControllerFailover() —
+  // its real cause text is the short "X → Y" epoch format; the longer
+  // fallback narrative below only ever shows when anomaly-sim's fake
+  // schedule fired instead.
+  const cfConfidence = real?.confidence ?? 0.99;
+  const cfCause = real?.cause ?? "KRaft controller epoch incremented: broker-1 → broker-2 (epoch 14→15) — active controller process became unresponsive";
   return schedule([
     { ms: 0, fn: () => {
       agents = patch(agents, "intake", { status: "acting" });
@@ -489,7 +502,7 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
       agents = patch(agents, "intake",  { status: "online" });
       agents = patch(agents, "monitor", { status: "reasoning", mralPhase: "reason" });
       dispatch({ type: "state", payload: { agents, mralPhase: "reason", broker: { ...mockBroker(0), controllerEpoch: 15 }, pendingApprovals: [..._globalPendingApprovals], incidentQueueDepth: 0 } });
-      dispatch({ type: "audit", record: auditRec("monitor", "KRaft controller failover detected: epoch 14→15, broker-1→broker-2", "reasoning") });
+      dispatch({ type: "audit", record: auditRec("monitor", `KRaft controller failover detected: ${cfCause}`, "reasoning") });
     }},
     { ms: 4000, fn: () => {
       dispatch({ type: "audit", record: auditRec("monitor", "Election completed in 220ms · no partition reassignment needed · cluster healthy", "reasoning") });
@@ -533,8 +546,8 @@ function runControllerFailover(dispatch: DispatchFn): () => void {
       sendEmail(dispatch, "controller-failover", "KRaft Controller Failover", 0, 0, "kafka.ackControllerFailover", {
         approvedBy: "system",
         reasoning: {
-          rootCause: "KRaft controller epoch incremented: broker-1 → broker-2 (epoch 14→15) — active controller process became unresponsive",
-          confidence: 0.99, kafkaFeatureCited: "KRaft Consensus Protocol",
+          rootCause: cfCause,
+          confidence: cfConfidence, kafkaFeatureCited: "KRaft Consensus Protocol",
           rationale: "Controller failover detected via epoch change. Possible causes: controller JVM OOM, network partition isolating quorum voters, or planned rolling restart. Election completed in 220ms — no partition reassignment required. Cluster healthy.",
         },
         lesson: { notes: "KRaft failover handled automatically. No consumer impact. Election latency within SLO." },
@@ -757,8 +770,15 @@ function runPartitionImbalance(dispatch: DispatchFn): () => void {
 
 // ── Benign rebalance (false-positive suppression) ────────────────────────────
 
-function runBenignRebalance(dispatch: DispatchFn): () => void {
+function runBenignRebalance(dispatch: DispatchFn, real?: { confidence: number; cause: string }): () => void {
   let agents = baseAgents();
+  // Real confidence/cause from monitor-poll.ts's evalBenignRebalance() when
+  // fired by genuine detection; falls back to the existing demo numbers
+  // otherwise. Only the canvas-visible lastReasoning + confidence are
+  // threaded through — sendEmail's differently-worded summary text is left
+  // as-is to keep this patch scoped to the prominent, actually-visible moment.
+  const brConfidence = real?.confidence ?? 0.97;
+  const brRootCause = real?.cause ?? "Normal partition rebalance during rolling consumer deployment — not a lag anomaly";
   return schedule([
     { ms: 0, fn: () => {
       agents = patch(agents, "intake", { status: "acting" });
@@ -780,8 +800,8 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
     { ms: 6000, fn: () => {
       agents = patch(agents, "monitor", { status: "acting", mralPhase: "act",
         lastReasoning: {
-          rootCause: "Normal partition rebalance during rolling consumer deployment — not a lag anomaly",
-          confidence: 0.97,
+          rootCause: brRootCause,
+          confidence: brConfidence,
           kafkaFeatureCited: "KIP-848 Share Groups",
           rebalanceState: "Rebalancing",
           controllerEpoch: 14,
@@ -815,7 +835,7 @@ function runBenignRebalance(dispatch: DispatchFn): () => void {
         approvedBy: "system",
         reasoning: {
           rootCause: "False positive: KIP-848 cooperative rebalance during rolling deployment — lag within tolerance",
-          confidence: 0.97, kafkaFeatureCited: "KIP-848 Cooperative Rebalancing",
+          confidence: brConfidence, kafkaFeatureCited: "KIP-848 Cooperative Rebalancing",
           rationale: "Lag 120 msgs is within cooperative rebalance tolerance (< 300 msgs). Consumer startup transient — threads have not yet reached full throughput. Group coordinator election during maintenance looks like outage but self-resolves. Suppressing page — not a real incident.",
         },
         lesson: { notes: "False-positive suppression worked correctly. Rebalance lag < 300 msgs is within tolerance." },
@@ -1766,14 +1786,14 @@ export function runTopicHeal(payload: TopicHealPayload, dispatch: DispatchFn, on
 // Keys must match the `id` values in the SCENARIOS array in Dashboard.tsx
 export type ScenarioKey = string;
 
-export function runClientScenario(key: ScenarioKey, dispatch: DispatchFn): () => void {
+export function runClientScenario(key: ScenarioKey, dispatch: DispatchFn, real?: { confidence: number; cause: string }): () => void {
   switch (key) {
-    case "lag-spike":                  return runLagSpike(dispatch);
-    case "controller-failover":        return runControllerFailover(dispatch);
+    case "lag-spike":                  return runLagSpike(dispatch, real);
+    case "controller-failover":        return runControllerFailover(dispatch, real);
     case "share-group":
     case "share-group-rebalance":      return runShareGroupRebalance(dispatch);
     case "benign-rebalance":
-    case "partition-imbalance":        return runBenignRebalance(dispatch);
+    case "partition-imbalance":        return runBenignRebalance(dispatch, real);
     // Extra scenarios
     case "schema-mismatch":            return runSchemaMismatch(dispatch);
     case "disk-saturation":            return runDiskSaturation(dispatch);
