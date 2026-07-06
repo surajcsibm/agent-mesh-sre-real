@@ -142,9 +142,14 @@ export function useMeshStream(simPaused: boolean) {
           }
           case "auto-topic-heal": {
             // Monitor detected an unhealthy topic and scheduled autonomous healing.
+            // This case never had a pause check at all — only "auto-trigger-scenario"
+            // did, and only that one spot got fixed when window.__simPaused was
+            // removed. Same gate, same ref, applied here for the first time.
             const { topicName, currentStatus, lagTotal, partitions } =
               event as { type: "auto-topic-heal"; topicName: string; currentStatus: "degraded" | "critical"; lagTotal: number; partitions: number };
-            runTopicHeal({ topicName, currentStatus, lagTotal, partitions }, dispatch as (a: SimAction) => void);
+            if (!simPausedRef.current) {
+              runTopicHeal({ topicName, currentStatus, lagTotal, partitions }, dispatch as (a: SimAction) => void);
+            }
             break;
           }
           case "approval-new": {
