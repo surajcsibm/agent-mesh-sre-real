@@ -263,3 +263,17 @@ export function getAnomalySimState() {
   return { running: sim.running, cycleCount: sim.cycleCount,
            lastInjectedId: sim.lastInjectedId, lastInjectedAt: sim.lastInjectedAt };
 }
+
+// Called by monitor-poll.ts when a REAL detection just fired one of the 3
+// scenarios it can genuinely trigger. Real detection takes priority over the
+// fake schedule — this pushes the next fake injection back by a fresh full
+// interval so it doesn't immediately follow a real event with something
+// unrelated, without needing to coordinate which specific scenario IDs
+// collide across the two files.
+export function deferNextAnomalyCycle(): void {
+  const sim = getSim();
+  if (!sim.running) return;
+  if (sim.timer) clearTimeout(sim.timer);
+  sim.timer = setTimeout(runCycle, rand());
+  console.log("[AnomalySim] Deferred — a real detection just fired, giving it room before the next fake cycle");
+}

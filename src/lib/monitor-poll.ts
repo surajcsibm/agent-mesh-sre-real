@@ -607,6 +607,18 @@ const CORE_SCENARIOS = new Set<PollScenarioId>([
   "benign-rebalance",
 ]);
 
+// Of the 4 core scenarios, only these 3 can be genuinely triggered for real
+// right now. "share-group" stays audit-log-only: real share-group state uses
+// a completely different broker coordinator/protocol than classic consumer
+// groups, so the existing consumer-group-based collection in kafka-admin.ts
+// cannot read it at all — this needs the separate in-cluster poller +
+// ops.kafka.metrics.v1 consumption path, not yet built.
+const READY_FOR_REAL_TRIGGER = new Set<PollScenarioId>([
+  "lag-spike",
+  "controller-failover",
+  "benign-rebalance",
+]);
+
 
 // ── Evaluator for extended scenarios signalled via /api/mesh/inject-signal ────
 function evalSignalledScenarios(
@@ -728,9 +740,13 @@ export async function runPollCycle(): Promise<void> {
     activeScenarios.add(scenarioId);
 
     {
-      // MRAL animation is handled by anomaly-sim via auto-trigger-scenario SSE.
       // Poll loop's role: detection, audit logging, cooldown tracking.
-      // Extended scenarios: emit anomaly notification only
+      // For the 3 scenarios real detection can genuinely drive
+      // (READY_FOR_REAL_TRIGGER), this ALSO fires the same auto-trigger-scenario
+      // event anomaly-sim.ts uses — useMeshStream.ts already handles it
+      // correctly with zero changes needed. Everything else (extended
+      // scenarios, and share-group until its real poller exists) stays
+      // audit-log-only, same as before.
       eventBus.publish({
         type: "audit",
         record: {
@@ -748,6 +764,16 @@ export async function runPollCycle(): Promise<void> {
         message: `Monitor detected: ${scenarioId} — ${cause.slice(0, 80)}`,
         kind: gate === "approval" ? "warning" : "info",
       });
+
+      if (READY_FOR_REAL_TRIGGER.has(scenarioId)) {
+        eventBus.publish({ type: "auto-trigger-scenario", scenarioId } as never);
+        try {
+          const { deferNextAnomalyCycle } = await import("./anomaly-sim");
+          deferNextAnomalyCycle();
+        } catch (e) {
+          console.warn("[MonitorPoll] deferNextAnomalyCycle failed:", (e as Error).message);
+        }
+      }
     }
 
     // Remove from active set after a short yield (fire-and-forget scenarios
