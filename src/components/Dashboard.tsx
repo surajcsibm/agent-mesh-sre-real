@@ -2265,7 +2265,12 @@ function ClusterStatsModal({
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction, triggerTopicHeal } = useMeshStream();
+  // Declared here, ahead of the other useState calls further down, because
+  // useMeshStream needs the current value on the very first render — it's a
+  // real parameter now, not read off `window`, so it must exist before the
+  // hook call uses it.
+  const [simPaused, setSimPaused] = useState(true);
+  const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction, triggerTopicHeal } = useMeshStream(simPaused);
   const phase = state.mralPhase ?? "idle";
 
   // Cluster polling — populates useClusterStore with real Aiven connection details
@@ -2388,7 +2393,6 @@ export default function Dashboard() {
   const [viewHistorySummary, setViewHistorySummary] = useState<EmailSummaryData | null>(null);
   const [reviewingApproval, setReviewingApproval] = useState<ApprovalRequest | null>(null);
   const [localPendingApprovals, setLocalPendingApprovals] = useState<ApprovalRequest[]>([]);
-  const [simPaused, setSimPaused] = useState(true);
   const [showAutoPauseNotice, setShowAutoPauseNotice] = useState(false);
   const autoPauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const allPendingApprovals = (() => {
@@ -2482,10 +2486,12 @@ export default function Dashboard() {
     return () => window.removeEventListener("open-approval-review", handler);
   }, []);
 
-  // Sync pause state to window so useMeshStream can check it
-  // Also schedule auto-pause after 10 minutes of active running
+  // simPaused is now passed directly into useMeshStream() as a parameter and
+  // mirrored into a ref inside that hook (matching the existing
+  // lastSummaryRef pattern there) — no more window global. This effect now
+  // only owns the auto-pause timer (resume-to-paused after 5 minutes of
+  // active running).
   React.useEffect(() => {
-    (window as unknown as Record<string, unknown>).__simPaused = simPaused;
     if (autoPauseTimerRef.current) clearTimeout(autoPauseTimerRef.current);
     if (!simPaused) {
       autoPauseTimerRef.current = setTimeout(() => {

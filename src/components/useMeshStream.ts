@@ -85,7 +85,7 @@ function reducer(state: MeshClientState, action: Action): MeshClientState {
 let toastId = 0;
 let particleId = 0;
 
-export function useMeshStream() {
+export function useMeshStream(simPaused: boolean) {
   const [state, dispatch] = useReducer(reducer, initial);
   const esRef = useRef<EventSource | null>(null);
   // Ref always holds the latest non-null emailSummary so showLastSummary is never stale,
@@ -94,6 +94,12 @@ export function useMeshStream() {
   if (state.emailSummary !== null) {
     lastSummaryRef.current = state.emailSummary;
   }
+  // Mirrors the simPaused parameter into a ref so the SSE handler (registered
+  // once, inside a useEffect with an empty dependency array) always reads the
+  // current value instead of closing over a stale one — same pattern as
+  // lastSummaryRef above. Replaces the previous window.__simPaused global.
+  const simPausedRef = useRef(simPaused);
+  simPausedRef.current = simPaused;
 
   useEffect(() => {
     let retryMs = 1000;
@@ -131,7 +137,7 @@ export function useMeshStream() {
             // Autonomous Monitor triggered a scenario — run the full client-side MRAL.
             // runClientScenario handles: animation, approval gates, notifications, email.
             const sid = (event as { type: "auto-trigger-scenario"; scenarioId: string }).scenarioId;
-            if (sid && !(window as unknown as Record<string, unknown>).__simPaused) runClientScenario(sid as ScenarioKey, dispatch as (a: SimAction) => void);
+            if (sid && !simPausedRef.current) runClientScenario(sid as ScenarioKey, dispatch as (a: SimAction) => void);
             break;
           }
           case "auto-topic-heal": {
