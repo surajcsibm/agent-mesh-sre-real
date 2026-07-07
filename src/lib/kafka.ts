@@ -198,21 +198,8 @@ async function buildRealProducer(): Promise<MeshProducer> {
 async function buildRealConsumer(groupId = "agent-mesh-sre-monitor"): Promise<MeshConsumer> {
   const { Kafka, logLevel } = await import("kafkajs");
 
-  const resolvedConfig = buildKafkaJSConfig("agent-mesh-sre-consumer");
-  // TEMP-DIAGNOSTIC: structural-only, never logs actual secret values —
-  // just whether ssl/sasl resolved truthy, to find why this specific caller
-  // (the first-ever consumer connection in this codebase) fails with a TLS
-  // handshake error while the identically-configured producer never has.
-  console.log("[Kafka REAL] Consumer config check:", {
-    sslType: typeof resolvedConfig.ssl,
-    sslTruthy: !!resolvedConfig.ssl,
-    hasSasl: "sasl" in resolvedConfig,
-    brokerCount: resolvedConfig.brokers?.length,
-    KAFKA_SSL_ENABLED_raw: JSON.stringify(process.env.KAFKA_SSL_ENABLED),
-  });
-
   const kafka = new Kafka({
-    ...resolvedConfig,
+    ...buildKafkaJSConfig("agent-mesh-sre-consumer"),
     logLevel: logLevel.WARN,
   });
 
