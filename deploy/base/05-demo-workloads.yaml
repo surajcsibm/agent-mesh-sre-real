@@ -1,3 +1,11 @@
+# ⚠️ DORMANT — part of the Strimzi/OpenShift /setup wizard path, NOT used by
+# the live demo. The actual live demo runs on DigitalOcean/CFK and uses
+# separately, manually-deployed workloads named demo-producer, demo-consumer,
+# and demo-share-consumer — see deploy/scripts/ for those (not managed by
+# this file). This manifest targets a Strimzi-provisioned cluster
+# (agent-mesh-kafka-kafka-bootstrap...svc:9093, SASL_SSL/SCRAM) that has
+# never been what's actually running. Only relevant if /setup is revived.
+#
 # Demo data-plane workloads. These are the Pods the scenario buttons
 # (and the shell scripts in deploy/scenarios/) manipulate. They reuse the
 # Strimzi Kafka image so we don't pull a second image onto the cluster.
