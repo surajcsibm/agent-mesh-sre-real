@@ -29,3 +29,5 @@ src/lib/mesh.ts.bak
 agent-mesh-sre-do-kubeconfig.yaml
 *.kubeconfig.yaml
 *-kubeconfig.yaml
+.env.local.save
+*.save
