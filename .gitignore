@@ -31,3 +31,5 @@ agent-mesh-sre-do-kubeconfig.yaml
 *-kubeconfig.yaml
 .env.local.save
 *.save
+.env.local.save
+*.save
