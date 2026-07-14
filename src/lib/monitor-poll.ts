@@ -192,21 +192,43 @@ async function collectSnapshot(): Promise<MetricSnapshot> {
   }
 
   if (rt.mode === "real") {
-    // ── KafkaJS admin — supplements ISR + real consumer groups ──────────────
+    // ── Primary: Use real-kafka-client for comprehensive metrics ─────────────
     try {
-      const { getKafkaAdminMetrics } = await import("./kafka-admin");
-      const admin = await getKafkaAdminMetrics();
-      if (admin.controllerEpoch > 0) snap.controllerEpoch = admin.controllerEpoch;
-      if (admin.brokersOnline  > 1) snap.brokersOnline   = admin.brokersOnline;
-      snap.underReplicatedPartitions = admin.underReplicatedPartitions;
-      for (const [id, cg] of Object.entries(admin.consumerGroups)) {
-        snap.consumerGroups[id] = cg;
+      const { collectRealClusterMetrics } = await import("./real-kafka-client");
+      const realMetrics = await collectRealClusterMetrics();
+      
+      snap.controllerEpoch = realMetrics.controllerEpoch;
+      snap.brokersOnline = realMetrics.brokerCount;
+      snap.underReplicatedPartitions = realMetrics.underReplicatedPartitions;
+      
+      for (const cg of realMetrics.consumerGroups) {
+        snap.consumerGroups[cg.groupId] = {
+          lag: cg.lag,
+          memberCount: cg.memberCount,
+          state: cg.state,
+        };
       }
+      
+      console.log(`[MonitorPoll] REAL metrics: ${realMetrics.brokerCount} brokers, ${realMetrics.consumerGroups.length} consumer groups`);
     } catch (e) {
-      console.warn("[MonitorPoll] KafkaAdmin error:", (e as Error).message);
+      console.warn("[MonitorPoll] real-kafka-client error:", (e as Error).message);
+      
+      // ── Fallback: KafkaJS admin — supplements ISR + real consumer groups ────
+      try {
+        const { getKafkaAdminMetrics } = await import("./kafka-admin");
+        const admin = await getKafkaAdminMetrics();
+        if (admin.controllerEpoch > 0) snap.controllerEpoch = admin.controllerEpoch;
+        if (admin.brokersOnline  > 1) snap.brokersOnline   = admin.brokersOnline;
+        snap.underReplicatedPartitions = admin.underReplicatedPartitions;
+        for (const [id, cg] of Object.entries(admin.consumerGroups)) {
+          snap.consumerGroups[id] = cg;
+        }
+      } catch (e2) {
+        console.warn("[MonitorPoll] KafkaAdmin fallback error:", (e2 as Error).message);
+      }
     }
 
-    // ── Aiven REST — disk metrics + topic sizes + CG lag from partitions ────
+    // ── Supplemental: Topic sizes + schema registry ──────────────────────────
     try {
       const { getServiceMetrics, getClusterTopicSizes, listTopics, listSchemas } =
         await import("./kafka-admin-cfk");
@@ -229,7 +251,7 @@ async function collectSnapshot(): Promise<MetricSnapshot> {
       const subjects = await listSchemas();
       snap.schemaVersionCounts = Object.fromEntries(subjects.map((s) => [s, 1]));
     } catch (e) {
-      console.warn("[MonitorPoll] Aiven REST error:", (e as Error).message);
+      // Topic sizes and schema registry are optional
     }
   }
 
