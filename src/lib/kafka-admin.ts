@@ -3,8 +3,8 @@
  * kafka-admin.ts
  * Lightweight KafkaJS admin client for the Monitor polling loop.
  *
- * Reads ISR state, consumer group lag, and controller epoch — data that
- * the Aiven REST API does not expose via its service/topic endpoints.
+ * Reads ISR state, consumer group lag, and controller epoch directly via
+ * the Kafka protocol — no vendor REST API involved.
  *
  * In MOCK mode returns a zero-baseline struct. The polling loop in mesh.ts
  * merges this with the live broker simulation state directly.

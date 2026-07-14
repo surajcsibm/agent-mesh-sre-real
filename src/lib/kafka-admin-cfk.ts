@@ -1,13 +1,14 @@
 /**
  * kafka-admin-cfk.ts
  * Kafka admin operations using KafkaJS — works with any Kafka cluster
- * (Confluent for Kubernetes, Confluent Cloud, Aiven, Redpanda, etc.)
+ * reachable over the standard protocol (Confluent for Kubernetes, Confluent
+ * Cloud, Redpanda, etc.). Live deployment: Confluent for Kubernetes on
+ * DigitalOcean Kubernetes Service, unauthenticated PLAINTEXT, no SASL.
  *
- * Replaces aiven-admin.ts — no proprietary REST API calls.
  * All operations go through the standard Kafka protocol via KafkaJS Admin.
  *
  * Required env vars (same for all providers):
- *   KAFKA_BOOTSTRAP         e.g. kafka.confluent.svc.cluster.local:9092
+ *   KAFKA_BOOTSTRAP         e.g. kafka.confluent.svc.cluster.local:9071
  *   KAFKA_SASL_MECHANISM    plain | scram-sha-256 | scram-sha-512 | (empty = no auth)
  *   KAFKA_USERNAME          (empty = no auth)
  *   KAFKA_PASSWORD          (empty = no auth)

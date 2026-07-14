@@ -3,9 +3,9 @@
  * Autonomous Monitor Agent polling loop.
  *
  * Runs every POLL_MS (30 s) collecting a MetricSnapshot from:
- *   • Aiven REST API  (disk metrics, topic sizes, consumer group lag from partitions)
- *   • KafkaJS admin   (ISR, controller epoch, consumer group state)
- *   • Mesh broker sim (MOCK mode — reads the in-memory broker state directly)
+ *   • real-kafka-client (primary: broker count, controller epoch, topics, consumer group lag)
+ *   • KafkaJS admin     (fallback path; ISR, controller epoch, consumer group state)
+ *   • Mesh broker sim   (MOCK mode — reads the in-memory broker state directly)
  *
  * Maintains a sliding window of WINDOW_SIZE snapshots (≈ 5 min of history).
  * Evaluates all 11 trigger conditions each cycle. When a condition fires it:
@@ -45,7 +45,7 @@ export interface MetricSnapshot {
     { lag: number; memberCount: number; state: string }
   >;
   underReplicatedPartitions: number;
-  /** null = not available (Aiven plan limitation) */
+  /** null = not available (KafkaJS Admin API has no disk-usage endpoint) */
   diskUsedPercent: number | null;
   /** topicName → total partition log bytes */
   topicSizeBytes: Record<string, number>;

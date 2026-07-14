@@ -63,25 +63,23 @@ export const MCP_TOOLS: MCPTool[] = [
     },
   },
   {
-    name: "kafka.checkpointShareGroup",
-    description: "Checkpoint a KIP-932 share group and optionally scale consumers.",
-    policyTags: ["infra-mutation", "share-group", "human-gated"],
+    name: "kafka.acknowledgeShareGroupRebalance",
+    description: "Acknowledge a KIP-932 share-group rebalance event. Broker manages delivery/offset state automatically; no client-side mutation is performed.",
+    policyTags: ["share-group", "human-gated"],
     requiresApproval: true,
     inputSchema: {
       type: "object",
       required: ["shareGroupId"],
       properties: {
-        shareGroupId:      { type: "string" },
-        delta:             { type: "integer" },
-        checkpointOffset:  { type: "integer" },
+        shareGroupId: { type: "string" },
+        reason:       { type: "string" },
       },
     },
     outputSchema: {
       type: "object",
       properties: {
-        checkpointed:    { type: "boolean" },
-        scaledBy:        { type: "integer" },
-        offsetCommitted: { type: "integer" },
+        acked:   { type: "boolean" },
+        auditId: { type: "string" },
       },
     },
   },
@@ -206,9 +204,9 @@ export const MCP_TOOLS: MCPTool[] = [
 // Per-agent tool binding — enforces least-privilege access.
 // An agent can only call the tools listed here, regardless of what mesh.ts requests.
 export const AGENT_TOOLS: Record<ServerAgentId, string[]> = {
-  intake:       ["kafka.scaleConsumers", "kafka.checkpointShareGroup"],
+  intake:       ["kafka.scaleConsumers", "kafka.acknowledgeShareGroupRebalance"],
   monitor:      ["kafka.scaleConsumers", "kafka.ackControllerFailover",
-                 "kafka.checkpointShareGroup", "kafka.suppressRebalancePage",
+                 "kafka.acknowledgeShareGroupRebalance", "kafka.suppressRebalancePage",
                  "sre.draftIncidentReport"],
   writer:       ["sre.draftIncidentReport", "sre.sendEmailSummary"],
   notification: ["sre.notifySlack", "sre.openITSMTicket", "sre.sendEmailSummary"],

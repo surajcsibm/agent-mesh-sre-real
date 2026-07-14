@@ -66,23 +66,24 @@ function makeInitialBroker(): BrokerState {
   const isReal = rt.mode === "real";
 
   if (isReal) {
-    // Real Kafka cluster (Aiven / RedPanda / Confluent) — single-node defaults.
-    // Aiven Startup-2 has 1 broker; mTLS client certs are not used (SASL only).
+    // Real Kafka cluster (Confluent for Kubernetes on DigitalOcean) — matches
+    // the live cluster's actual shape until real polling data arrives.
+    // No SASL/mTLS: the external listener is unauthenticated PLAINTEXT.
     return {
       mode: "REAL",
       controllerEpoch: 1,
-      brokersOnline: 1,
-      mtls: false,      // Aiven uses SASL/SCRAM, not mTLS client certs
-      sasl: true,
+      brokersOnline: 3,
+      mtls: false,      // Unauthenticated PLAINTEXT NodePort — no SASL, no mTLS
+      sasl: false,
       aclCount: 0,
       topics: {
-        "ops.requests.v1":      { partitions: 1, lag: 0, offsetHigh: 0 },
-        "ops.kafka.metrics.v1": { partitions: 1, lag: 0, offsetHigh: 0 },
-        "ops.incidents.v1":     { partitions: 1, lag: 0, offsetHigh: 0 },
-        "ops.actions.audit.v1": { partitions: 1, lag: 0, offsetHigh: 0 },
-        "ops.lessons.v1":       { partitions: 1, lag: 0, offsetHigh: 0 },
-        "ops.notifications.v1": { partitions: 1, lag: 0, offsetHigh: 0 },
-        "demo.payments.events": { partitions: 1, lag: 0, offsetHigh: 0 },
+        "ops.requests.v1":      { partitions: 6,  lag: 0, offsetHigh: 0 },
+        "ops.kafka.metrics.v1": { partitions: 6,  lag: 0, offsetHigh: 0 },
+        "ops.incidents.v1":     { partitions: 6,  lag: 0, offsetHigh: 0 },
+        "ops.actions.audit.v1": { partitions: 12, lag: 0, offsetHigh: 0 },
+        "ops.lessons.v1":       { partitions: 3,  lag: 0, offsetHigh: 0 },
+        "ops.notifications.v1": { partitions: 3,  lag: 0, offsetHigh: 0 },
+        "demo.payments.events": { partitions: 24, lag: 0, offsetHigh: 0 },
       },
       consumerGroups: {
         "payments-consumer": { lag: 0, rebalanceState: "stable", members: 1 },
@@ -250,9 +251,9 @@ function buildShareGroupReasoning(s: MeshState): ReasoningOutput {
     rebalanceState: "stable", controllerEpoch: s.broker.controllerEpoch,
     crossCorrelation: { brokers: "all_online", jvmHeap: "72%", networkInRate: "elevated", rebalanceInProgress: false },
     recommendedAction: "share-group-rebalance-ack", requiresApproval: true,
-    rationale: "Share group 'share-group-1' queue depth at 18,000 records. KIP-932 share group semantics require explicit checkpoint before scaling. Adding 1 consumer and committing checkpoint offset. Requires approval due to infra mutation.",
+    rationale: "Share group 'share-group-1' queue depth at 18,000 records. KIP-932 delivery/offset state is broker-managed — acknowledging the rebalance event, not mutating cluster state. Requires approval because it reflects Monitor's judgment on an active share-group event.",
     proposedToolCall: { jsonrpc: "2.0", id: uid(), method: "tools/call",
-      params: { name: "kafka.checkpointShareGroup", arguments: { shareGroupId: "share-group-1", delta: 1, checkpointOffset: 18000 } } },
+      params: { name: "kafka.acknowledgeShareGroupRebalance", arguments: { shareGroupId: "share-group-1", reason: "KIP-932 queue depth: 18,000 records" } } },
     lessonsCited: [],
   };
 }
@@ -650,7 +651,7 @@ async function runShareGroup() {
 };
   s.pendingApprovals.push(approval);
   broadcastState();
-  toast("Policy gate: approval required for kafka.checkpointShareGroup", "warning");
+  toast("Policy gate: approval required for kafka.acknowledgeShareGroupRebalance", "warning");
 
   const decision = await waitForApproval(approvalId);
   if (decision === "reject") {
@@ -660,27 +661,27 @@ async function runShareGroup() {
 
   setMral("act");
   setAgent("monitor", { mralPhase: "act", status: "acting" });
-  audit("tool-call", "monitor", "kafka.checkpointShareGroup: delta=1, checkpoint=18000", reasoning.proposedToolCall);
+  audit("tool-call", "monitor", "kafka.acknowledgeShareGroupRebalance: acknowledging rebalance event", reasoning.proposedToolCall);
   await sleep(700);
 
-  // ── REAL MODE: verify topics exist on Aiven before checkpoint ───────────────
+  // ── REAL MODE: verify topics exist, then acknowledge the rebalance ──────────
   let sgLagAfter = 2000;
-  let sgMutation = "MOCK: in-memory share group checkpointed";
+  let sgMutation = "MOCK: in-memory share-group rebalance acknowledged";
 
-  if (process.env.KAFKA_MODE === "real") {
+  if (process.env.KAFKA_MODE?.toLowerCase() === "real") {
     try {
       const { listTopics } = await import("./kafka-admin-cfk");
       const topics = await listTopics();
       const hasPayments = topics.includes("demo.payments.events");
       const hasNotifications = topics.includes("ops.notifications.v1");
-      sgMutation = `Aiven API: ${topics.length} topics verified. demo.payments.events=${hasPayments}, ops.notifications.v1=${hasNotifications}. Share group checkpoint=18000 logged.`;
+      sgMutation = `REAL Kafka: ${topics.length} topics verified. demo.payments.events=${hasPayments}, ops.notifications.v1=${hasNotifications}. Rebalance acknowledged — KIP-932 delivery state is broker-managed, no client-side mutation performed.`;
       audit("tool-call", "monitor",
-        `REAL kafka.checkpointShareGroup — Aiven: ${topics.length} topics, checkpoint=18000`,
+        `REAL kafka.acknowledgeShareGroupRebalance — ${topics.length} topics verified`,
         { topicCount: topics.length, hasPayments, hasNotifications });
     } catch (e) {
-      sgMutation = `Aiven API error: ${e instanceof Error ? e.message : String(e)}`;
+      sgMutation = `Kafka API error: ${e instanceof Error ? e.message : String(e)}`;
       audit("tool-call", "monitor",
-        `REAL kafka.checkpointShareGroup — Aiven API error: ${e instanceof Error ? e.message : e}`, {});
+        `REAL kafka.acknowledgeShareGroupRebalance — Kafka API error: ${e instanceof Error ? e.message : e}`, {});
     }
   }
 
@@ -689,9 +690,9 @@ async function runShareGroup() {
 
   const action: ActionResult = {
     approved: true, approvedBy: approval.approvedBy, outcome: "success",
-    detail: "Share group checkpointed at offset 18000. Scaled share-group-1 2→3 consumers.",
+    detail: "Share-group rebalance for share-group-1 acknowledged; broker manages delivery state automatically under KIP-932.",
     lagBefore: 18000, lagAfter: sgLagAfter,
-    toolCalled: "kafka.checkpointShareGroup",
+    toolCalled: "kafka.acknowledgeShareGroupRebalance",
     clusterMutation: sgMutation,
   };
   setAgent("monitor", { lastAction: action });
@@ -748,18 +749,18 @@ async function runBenignRebalance() {
   // ── REAL MODE: fetch live consumer groups to confirm rebalance state ────────
   let suppressDetail = "Alert suppressed: lag rise during KIP-848 cooperative rebalance. No page sent.";
 
-  if (process.env.KAFKA_MODE === "real") {
+  if (process.env.KAFKA_MODE?.toLowerCase() === "real") {
     try {
       const { listConsumerGroups } = await import("./kafka-admin-cfk");
       const groups = await listConsumerGroups();
-      suppressDetail = `REAL: Aiven consumer groups (${groups.length} total): [${groups.slice(0, 5).join(", ")}]. KIP-848 rebalance suppression applied — no page sent.`;
+      suppressDetail = `REAL: consumer groups (${groups.length} total): [${groups.slice(0, 5).join(", ")}]. KIP-848 rebalance suppression applied — no page sent.`;
       audit("tool-call", "monitor",
-        `REAL kafka.suppressRebalancePage — Aiven: ${groups.length} consumer groups`,
+        `REAL kafka.suppressRebalancePage — ${groups.length} consumer groups`,
         { groups });
     } catch (e) {
-      suppressDetail = `Alert suppressed: KIP-848 rebalance. Aiven API error: ${e instanceof Error ? e.message : String(e)}`;
+      suppressDetail = `Alert suppressed: KIP-848 rebalance. Kafka API error: ${e instanceof Error ? e.message : String(e)}`;
       audit("tool-call", "monitor",
-        `REAL kafka.suppressRebalancePage — Aiven API error: ${e instanceof Error ? e.message : e}`, {});
+        `REAL kafka.suppressRebalancePage — Kafka API error: ${e instanceof Error ? e.message : e}`, {});
     }
   }
 

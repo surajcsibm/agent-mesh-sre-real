@@ -267,17 +267,16 @@ function describeToolCall(toolCall: MCPToolCall) {
         impact: "Temporary infra change · Auto-reverts when lag clears",
         impactColor: "amber",
       };
-    case "kafka.checkpointShareGroup":
+    case "kafka.acknowledgeShareGroupRebalance":
       return {
         emoji: "📌",
-        title: "Checkpoint Share Group",
-        summary: `Checkpoint KIP-932 share group "${args.shareGroupId}"`,
+        title: "Acknowledge Share-Group Rebalance",
+        summary: `Acknowledge KIP-932 rebalance for share group "${args.shareGroupId}"`,
         rows: [
           ["Share group ID",   String(args.shareGroupId)],
-          ...(args.delta ? [["Consumer delta", `+${args.delta}`] as [string, string]] : []),
-          ...(args.checkpointOffset ? [["Checkpoint offset", String(args.checkpointOffset)] as [string, string]] : []),
+          ["Reason",           String(args.reason ?? "Rebalance event detected")],
         ] as [string, string][],
-        impact: "Offset committed · No partition reassignment needed",
+        impact: "Acknowledge-only · Broker manages delivery state, no client-side mutation",
         impactColor: "blue",
       };
     case "kafka.suppressRebalancePage":
@@ -621,7 +620,7 @@ function DataRow({ label, children, last = false }: { label: string; children: R
 
 const SCENARIO_TOOL_CALLS: Record<string, { name: string; arguments: Record<string, unknown> }> = {
   "lag-spike":               { name: "kafka.scaleConsumers",        arguments: { group: "payments-consumer-group", delta: 3, reason: "Consumer lag exceeded 10,000 messages." } },
-  "share-group":             { name: "kafka.checkpointShareGroup",  arguments: { shareGroupId: "payments-share-group", checkpointOffset: 4821, delta: 2 } },
+  "share-group":             { name: "kafka.acknowledgeShareGroupRebalance", arguments: { shareGroupId: "payments-share-group", reason: "KIP-932 rebalance detected" } },
   "schema-mismatch":         { name: "kafka.updateSchemaCompatibility", arguments: { subject: "payments.events-value", compatibility: "BACKWARD_TRANSITIVE" } },
   "under-replication":       { name: "kafka.reassignPartitions",    arguments: { topic: "ops.actions.audit.v1", fromBroker: "broker-3", toBroker: "broker-1", partitionCount: 4 } },
   "controller-failover":     { name: "kafka.acknowledgeFailover",   arguments: { newControllerId: "broker-2", epoch: 15 } },
@@ -2059,7 +2058,7 @@ function ScenarioHistoryBar({ history, onView, onReview, pendingApprovals }: {
 
 // ── Cluster Statistics modal ──────────────────────────────────────────────────
 // Opened when the user clicks the "REAL mode" / "MOCK mode" badge in the nav.
-// Shows live Aiven connection details (from useClusterStore) + broker topology.
+// Shows live cluster connection details (from useClusterStore) + broker topology.
 
 function ClusterStatsModal({
   modeInfo,
@@ -2072,7 +2071,7 @@ function ClusterStatsModal({
 }) {
   const kafka      = modeInfo?.kafka;
   const isReal     = modeInfo?.mode === "real";
-  const isAiven    = isReal && !!kafka?.bootstrapInternal && !modeInfo?.kubeAvailable;
+  const isK8sCluster = isReal && !!kafka?.bootstrapInternal && !!modeInfo?.kubeAvailable;
   const host       = kafka?.bootstrapInternal?.split(":")[0] ?? "—";
   const port       = kafka?.bootstrapInternal?.split(":")[1] ?? "—";
   const hostShort  = host;
@@ -2096,7 +2095,7 @@ function ClusterStatsModal({
              style={{ background: "#1e3a5f", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: "#93c5fd" }}>
-              {isAiven ? "CFK · Confluent for Kubernetes" : isReal ? "Real Cluster" : "Simulator"}
+              {isK8sCluster ? "CFK · Confluent for Kubernetes" : isReal ? "Real Cluster" : "Simulator"}
             </div>
             <div className="text-sm font-bold text-white">Cluster Statistics</div>
           </div>
@@ -2273,7 +2272,7 @@ export default function Dashboard() {
   const { state, trigger, approve, agentAction, reset, dismissEmailSummary, showLastSummary, triggerTopicAction, triggerTopicHeal } = useMeshStream(simPaused);
   const phase = state.mralPhase ?? "idle";
 
-  // Cluster polling — populates useClusterStore with real Aiven connection details
+  // Cluster polling — populates useClusterStore with real cluster connection details
   useClusterPolling();
   const modeInfo = useClusterStore((s) => s.mode);
 
