@@ -467,25 +467,39 @@ import("./event-bus").then(({ getEventBus }) =>
   audit("tool-call", "monitor", "kafka.scaleConsumers: delta=2, group=payments-consumer", reasoning.proposedToolCall);
   await sleep(800);
 
-  // ── REAL MODE: call Aiven API to get live consumer group state ──────────────
+  // ── REAL MODE: call real Kafka client to get live consumer group state ──────
   let realLagAfter = 1200;
   let realMembers = s.broker.consumerGroups["payments-consumer"].members + 2;
   let clusterMutation = "MOCK: in-memory consumer group scaled";
 
-  if (process.env.KAFKA_MODE === "real") {
+  if (process.env.KAFKA_MODE?.toLowerCase() === "real") {
     try {
-      const { describeConsumerGroup } = await import("./kafka-admin-cfk");
-      const cg = await describeConsumerGroup("payments-consumer");
-      realLagAfter = Math.max(0, cg.lag - 12000);
+      const { describeRealConsumerGroup, getRealConsumerLag } = await import("./real-kafka-client");
+      const cg = await describeRealConsumerGroup("payments-consumer");
+      const lagInfo = await getRealConsumerLag("payments-consumer", "demo.payments.events");
+      
+      realLagAfter = Math.max(0, lagInfo.lag - 12000);
       realMembers = cg.memberCount + 2;
-      clusterMutation = `Aiven API: payments-consumer — state=${cg.state}, members=${cg.memberCount}, lag=${cg.lag}. Scale delta=+2 logged.`;
+      clusterMutation = `REAL Kafka: payments-consumer — state=${cg.state}, members=${cg.memberCount}, lag=${lagInfo.lag}. Scale delta=+2 logged.`;
       audit("tool-call", "monitor",
-        `REAL kafka.scaleConsumers — Aiven: state=${cg.state}, members=${cg.memberCount}, lag=${cg.lag}`,
-        { cg, action: "scale +2" });
+        `REAL kafka.scaleConsumers — state=${cg.state}, members=${cg.memberCount}, lag=${lagInfo.lag}`,
+        { cg, lagInfo, action: "scale +2" });
     } catch (e) {
-      clusterMutation = `Aiven API error: ${e instanceof Error ? e.message : String(e)}`;
-      audit("tool-call", "monitor",
-        `REAL kafka.scaleConsumers — Aiven API error: ${e instanceof Error ? e.message : e}`, {});
+      // Fallback to kafka-admin-cfk
+      try {
+        const { describeConsumerGroup } = await import("./kafka-admin-cfk");
+        const cg = await describeConsumerGroup("payments-consumer");
+        realLagAfter = Math.max(0, cg.lag - 12000);
+        realMembers = cg.memberCount + 2;
+        clusterMutation = `REAL Kafka (fallback): payments-consumer — state=${cg.state}, members=${cg.memberCount}, lag=${cg.lag}. Scale delta=+2 logged.`;
+        audit("tool-call", "monitor",
+          `REAL kafka.scaleConsumers (fallback) — state=${cg.state}, members=${cg.memberCount}, lag=${cg.lag}`,
+          { cg, action: "scale +2" });
+      } catch (e2) {
+        clusterMutation = `Kafka API error: ${e2 instanceof Error ? e2.message : String(e2)}`;
+        audit("tool-call", "monitor",
+          `REAL kafka.scaleConsumers — Kafka API error: ${e2 instanceof Error ? e2.message : e2}`, {});
+      }
     }
   }
 
@@ -547,21 +561,35 @@ async function runControllerFailover() {
   audit("tool-call", "monitor", "kafka.ackControllerFailover — audit only, no mutation", reasoning.proposedToolCall);
   await sleep(500);
 
-  // ── REAL MODE: fetch live Aiven service info for ack detail ─────────────────
+  // ── REAL MODE: fetch live cluster info for ack detail ───────────────────────
   let failoverDetail = `KRaft failover epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked in 312ms. No page sent.`;
 
-  if (process.env.KAFKA_MODE === "real") {
+  if (process.env.KAFKA_MODE?.toLowerCase() === "real") {
     try {
-      const { getServiceInfo } = await import("./kafka-admin-cfk");
-      const svc = await getServiceInfo();
-      failoverDetail = `REAL: Aiven service state=${svc.state}, nodes=${svc.nodeCount}, kafka=${svc.kafkaVersion}. Epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked. No page sent.`;
+      const { collectRealClusterMetrics } = await import("./real-kafka-client");
+      const metrics = await collectRealClusterMetrics();
+      failoverDetail = `REAL: Kafka cluster brokers=${metrics.brokerCount}, controllerEpoch=${metrics.controllerEpoch}, topics=${metrics.topics.length}. Epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked. No page sent.`;
       audit("tool-call", "monitor",
-        `REAL kafka.ackControllerFailover — Aiven: state=${svc.state}, nodes=${svc.nodeCount}`,
-        { svc });
+        `REAL kafka.ackControllerFailover — brokers=${metrics.brokerCount}, epoch=${metrics.controllerEpoch}`,
+        { metrics });
+      
+      // Update broker state with real values
+      s.broker.brokersOnline = metrics.brokerCount;
+      s.broker.controllerEpoch = metrics.controllerEpoch;
     } catch (e) {
-      failoverDetail = `KRaft failover epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked. Aiven API error: ${e instanceof Error ? e.message : String(e)}`;
-      audit("tool-call", "monitor",
-        `REAL kafka.ackControllerFailover — Aiven API error: ${e instanceof Error ? e.message : e}`, {});
+      // Fallback to kafka-admin-cfk
+      try {
+        const { getServiceInfo } = await import("./kafka-admin-cfk");
+        const svc = await getServiceInfo();
+        failoverDetail = `REAL: Kafka service state=${svc.state}, nodes=${svc.nodeCount}. Epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked. No page sent.`;
+        audit("tool-call", "monitor",
+          `REAL kafka.ackControllerFailover (fallback) — state=${svc.state}, nodes=${svc.nodeCount}`,
+          { svc });
+      } catch (e2) {
+        failoverDetail = `KRaft failover epoch ${s.broker.controllerEpoch - 1}→${s.broker.controllerEpoch} acked. Kafka API error: ${e2 instanceof Error ? e2.message : String(e2)}`;
+        audit("tool-call", "monitor",
+          `REAL kafka.ackControllerFailover — Kafka API error: ${e2 instanceof Error ? e2.message : e2}`, {});
+      }
     }
   }
 
